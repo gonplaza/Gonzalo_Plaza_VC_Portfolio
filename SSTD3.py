@@ -51,7 +51,7 @@ class ReplayBuffer(object):
 		)
 
 
-
+################## CHECK IF PARAMETERS ARE APPROPRIATE ####################
 class OUNoise:
     def __init__(self, size, mu=0, theta=0.15, sigma=0.2, x0=None):
 	# parameters for the Ornstein-Uhlenbeck noise
@@ -235,8 +235,10 @@ class Agent(object):
 		self.critic_target = Critic(state_dim, action_dim, net_width, name="Critic_Target").to(self.device) # Initialise target critic network
 
 		self.softmax_operator = Softmax()
-		
+
+		####################### CHECK IF THE PARAMETERS OF THIS NOISE ARE APPROPRIATE #####################
 		self.noise = OUNoise(size=action_dim, mu=0, theta=0.15, sigma=0.2) # initialise noise class
+				  
 		self.memory = ReplayBuffer(self.state_dim, self.action_dim, self.max_size) # initialise replay buffer class
 
 	def select_action(self, state, noise=True):# only used when interact with the env
@@ -268,9 +270,11 @@ class Agent(object):
 		with torch.no_grad():
 			state, action, reward, next_state, end = self.memory.sample(self.batch_size) # sample batch of experiences
 			target_action = self.actor_target.forward(next_state)
-
+			
+			####################### CHECK IF THE PARAMETERS OF THIS NOISE ARE APPROPRIATE #####################
 			noise = torch.randn_like(target_action) * 0.2 # 0.2 to scale de noise
 			noise = noise.clamp(-0.5, 0.5) # clamp noise to prevent excessively large perturbations
+			
 			smoothed_target_action = target_action + noise # apply random noise to smooth the target action
 
 		target_Q1, target_Q2 = self.critic_target.forward(next_state, smoothed_target_action) # target Q-values
