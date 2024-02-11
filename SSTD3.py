@@ -52,39 +52,41 @@ class ReplayBuffer(object):
 
 
 
-class OUNoise(object):
-    def __init__(self, mu, sigma=0.05, theta=.2, dt=1e-2, x0=None):
-		# parameters for the Ornstein-Uhlenbeck noise
+class OUNoise:
+    def __init__(self, size, mu=0, theta=0.15, sigma=0.2, x0=None):
+	# parameters for the Ornstein-Uhlenbeck noise
+        self.mu = mu * np.ones(size)
         self.theta = theta
-        self.mu = mu
         self.sigma = sigma
-        self.dt = dt
         self.x0 = x0
-        self.reset() # resets parameters when initialised, to ensure consistent initial state every time the noise function is used
-
-    def __call__(self): # activated when class is called
-        x = self.x_prev + self.theta * (self.mu - self.x_prev) * self.dt + \
-            self.sigma * np.sqrt(self.dt) * np.random.normal(size=self.mu.shape) # generates next value on OU process
-        self.x_prev = x # updates previous value for further OU process if needed
-        return x
+        self.state = np.copy(self.mu)
+        self.reset()  # resets parameters when initialised, to ensure consistent initial state every time the noise function is used
 
     def reset(self):
-        self.x_prev = self.x0 if self.x0 is not None else np.zeros_like(self.mu) # resets to x0 if provided, and to an array of zeroes if not
+        # Resets to x0 if provided, and to an array of zeroes (shaped like mu) if not
+        self.state = self.x0 if self.x0 is not None else np.zeros_like(self.mu)
+
+    def noise(self):
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x))
+        self.state = x + dx
+        return self.state
 
     def __repr__(self):
-        return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma) # keeps track of the OU noises generated
+        # Provides a textual representation of the OU noise parameters
+        return f'OrnsteinUhlenbeckActionNoise(mu={self.mu}, sigma={self.sigma}, theta={self.theta})'
 
 
 
 class Softmax:
 	# function to calculate weights using the softmax operator
 	def softmax(self, x):
-		exp_x = np.exp(x)
+		exp_x = np.exp(x - np.max(x)) # subtracting np.max(x) for numerical stability
 		return exp_x / np.sum(exp_x)
 
     # calculate the weights for the Q-values, and return the final Q-value with the weights swapped
 	def swap(self, q1, q2):
-		s_weights = Softmax.softmax([q1, q2])
+		s_weights = self.softmax([q1, q2])
 		w1, w2 = s_weights
 		
 		return w1*q2 +w2*q1
@@ -122,7 +124,7 @@ class Actor(nn.Module): # inherits neural network module
 		a = self.layer2(a)
 		a = self.bn2(a)
 		a = F.relu (a)
-		a = (torch.tanh(self.layer3(a))+1)/2 # scales and shifts outputs between 0 and 1
+		a = (torch.tanh(self.layer3(a))+1)/2 # scales and shifts outputs between 0 and 1 - endowment
 		return a
 	
 	def save_checkpoint(self):
@@ -219,7 +221,7 @@ class Agent(object):
 		self.critic_lr = critic_lr # critic netork learning rate
 		self.batch_size = batch_size
 		self.delay_freq = policy_delay_freq
-		self.delay_counter = -1
+		self.delay_counter = 0
 		
 		self.device = device
 
@@ -231,11 +233,13 @@ class Agent(object):
         #target networks fo not need optimisers as parameters are updated using soft update
 		self.actor_target = Actor(state_dim, action_dim, net_width, name="Actor_Target").to(self.device) # Initialise target actor network	
 		self.critic_target = Critic(state_dim, action_dim, net_width, name="Critic_Target").to(self.device) # Initialise target critic network
+
+		self.softmax_operator = Softmax()
 		
-		self.noise = OUNoise(mu=np.zeros(action_dim)) # initialise noise class
+		self.noise = OUNoise(size=action_dim, mu=0, theta=0.15, sigma=0.2) # initialise noise class
 		self.memory = ReplayBuffer(self.state_dim, self.action_dim, self.max_size) # initialise replay buffer class
 
-	def select_action(self, state):# only used when interact with the env
+	def select_action(self, state, noise=True):# only used when interact with the env
 		self.actor.eval() # switch actor network to evaluation mode (appropriate as not training)
 		
 		with torch.no_grad(): # disable gradient computation as not needed for action selection (not training) - saves computation time	
@@ -244,8 +248,13 @@ class Agent(object):
 			a = self.actor.forward(observation).to(self.device) # select an action based on the observation
 			
 		self.actor.train() # switch back to training mode
+
+		# add the Ornstein-Uhlenbeck noise for action exploration
+		if noise:
+				ou_noise = self.noise.noise()
+				a += ou_noise
 		
-		return a.cpu().numpy().flatten() # converts the action tensor to numpy array, moves it to the CPU (ensures compatibility), and converts it to 1D
+		return a.cpu().detach().numpy().flatten() # converts the action tensor to numpy array, moves it to the CPU (ensures compatibility), converts it to 1D, and detaches to ensure no gradient computation
 	
 	def remember(self, state, action, reward, new_state, end):
 		self.memory.add(state, action, reward, new_state, end)
@@ -259,29 +268,31 @@ class Agent(object):
 		with torch.no_grad():
 			state, action, reward, next_state, end = self.memory.sample(self.batch_size) # sample batch of experiences
 			target_action = self.actor_target.forward(next_state)
-			smoothed_target_action = target_action + torch.FloatTensor(self.noise()).to(self.device) # apply the OU nosie to the action 
-			######## consider adding noise in action selection instead of here (or both, but this could be counterproductive) - clamp between 0 and 1? ########
+
+			noise = torch.randn_like(target_action) * 0.2 # 0.2 to scale de noise
+			noise = noise.clamp(-0.5, 0.5) # clamp noise to prevent excessively large perturbations
+			smoothed_target_action = target_action + noise # apply random noise to smooth the target action
 
 		target_Q1, target_Q2 = self.critic_target.forward(next_state, smoothed_target_action) # target Q-values
-		target_Q = Softmax.swap(target_Q1, target_Q2) # apply the softmax operator
-		y = reward + self.gamma*target_Q*(1 - end) # TD target, no update if end=1
+		target_Q = self.softmax_operator.swap(target_Q1, target_Q2) # apply the softmax operator
+		y = reward + (self.gamma*target_Q*(1 - end)).detach() # TD target, no update if end=1
 
 
 		# Get current Q estimates
 		current_Q1, current_Q2 = self.critic(state, action)
 
 		# Compute the Mean Squared Error (MSE) loss function
-		Q_loss = F.mse_loss(current_Q1, y) + F.mse_loss(current_Q2, y)
+		critic_loss = F.mse_loss(current_Q1, y.detach()) + F.mse_loss(current_Q2, y.detach()) # detach method used to prevent gradients from flowing into the target Q-values (should remain fixed during critic update)
 
 		self.critic_optimizer.zero_grad() # clear gradients from previous iteration
-		Q_loss.backward() # compute gradients of loss function
+		critic_loss.backward() # compute gradients of loss function
 		self.critic_optimizer.step() # update the critic network parameters using Adam optimisation
 
-        # only update actor and target networks parameters at periodic intervals
-		if self.delay_counter == self.delay_freq:
-			 # Update actor parameters - instead of gradient ascent of the mean of the Q-values, we do gradient descent on the negative mean
-			action_for_loss = self.actor.forward(state)
-			actor_loss = -self.critic.forward(state, action_for_loss).mean() ##### will mean function work???
+        # only update actor network and both target networks parameters at periodic intervals
+		if self.delay_counter % self.delay_freq == 0:
+			# Update actor parameters - instead of gradient ascent of the mean of the Q-values, we do gradient descent on the negative mean
+			q1, _ = self.critic(state, self.actor(state))
+			actor_loss = -q1.mean() # mean works as only one of the two critic outputs used, as I should
 			self.actor_optimizer.zero_grad()
 			actor_loss.backward()
 			self.actor_optimizer.step()
@@ -293,7 +304,7 @@ class Agent(object):
 			for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
 				target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-			self.delay_counter = -1 # reset delay counter
+			self.delay_counter = 0 # reset delay counter
 			
 	def save_model_parameters(self): # saves the model paramenters of all networks
 		self.actor.save_checkpoint()
@@ -336,5 +347,4 @@ class Agent(object):
         # pause and wait for user input to continue program - allows for manual inspection of printed parameters	
 		input()
 
-		
     
