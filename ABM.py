@@ -28,7 +28,7 @@ np.random.seed(0) # enables consisent outputs from random number generation
 Number_of_VCs = 100 # as a starting point 
 Fund_maturity = 32 # number of time steps to realise returns (8 years) - each time step is 3 months (one quarter)
 
-#################### CHECK VC QUALITY DISTRIBUTION (longnormal for TVPI), VC_QUALITY NORMALISATION, AND AVERAGE PORTFOLIO SIZE (AND ITS USE) ######################
+#################### CHECK VC QUALITY DISTRIBUTION (lognormal for TVPI), VC_QUALITY NORMALISATION, AND AVERAGE PORTFOLIO SIZE (AND ITS USE) ######################
 VC_quality_shape = 0.39 # shape coefficient for lognormal distribution
 VC_quality_loc = -0.49 # location coefficient for lognormal distribution
 VC_max_scale = 1.70 # scale coefficient for lognormal distribution
@@ -64,27 +64,26 @@ Startup_exit = 20 # number of time steps it takes a startup to exit (5 years)
 #################### CHECK NUMBER OF NEW STARTUPS #########################
 ##Startup Coefficients
 #Startup Coefficients - General
-Number_of_new_startups = 25600 #Number of business starts in USA every 3 months, In fact, it is 256000, but for computaional reasons we devide everything by 10
-Growth_a = -2.89 # a coefficient for the skewed normal distribution of revenue growth for a startup, taken as a measure of potential
-Growth_loc = 0.55 # loc coefficient for the skewed normal distribution of revenue growth for a startup, taken as a measure of potential
-Growth_scale = 0.54 # scale coefficient for the skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+Number_of_new_startups = 25600 #Number of business starts in USA every 3 months, In fact, it is 256000, but for computational reasons we devide everything by 10
+Growth_a = -2.89 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+Growth_loc = 0.55 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+Growth_scale = 0.54 # scale parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+# dictionaries with loc and scale parameters for the revenue growth distribution for each subindustry
+Sub_Industry_loc = {"Sub_Industry_1": 0.475, "Sub_Industry_2": 0.530, "Sub_Industry_3": 0.553, "Sub_Industry_4": 0.576, "Sub_Industry_5": 0.632}
+Sub_Industry_scale = {"Sub_Industry_1": 0.466, "Sub_Industry_2": 0.520, "Sub_Industry_3": 0.543, "Sub_Industry_4": 0.565, "Sub_Industry_5": 0.621}
 
 ############### CHANGE THIS ###################
 #Startup Coefficients - Time progression equation
-#EPI = Alpha*EPI + Beat*VC + Industry_Shock + Macro_Shock + Idiosyncratic_shock
+#Gorwth = Alpha*Growth + Beta*VC + Idiosyncratic_shock
 Alpha = 0.99 #alpha coefficient for time progression equation. Expresses weight of EPI
 Beta = 0.01 #beta coefficient for time progression equation. Expresses the weight of VC 
-Macro_shock_mean = 0 #mean for normal distribution of macro shock
-Macro_shock_sd = 0.0681 #standard deviation for normal distribution of macro shock
-Industry_shock_mean = 0 #mean for normal distribution of industry shock
-Industry_shock_sd = 0.0432 #standard deviatio for normal distribution of industry shock
 Idiosyncratic_shock_mean = 0 #mean for normal distribution for idiosyncratic shock
 Idiosyncratic_shock_sd = 0.0775 #standard deviation for normal distribtion for idiosyncratic shock
 
-############################# USEFUL? #############################
-#Startup Coefficeints - Industries
-List_of_Industries = ["Business Products and Services", "Customer Products and Services", "Financial Services", "Energy", "Information Technology", "Healthcare", "Materials and Resources"]
-Probability_Distribution_of_Industries = [0.1496, 0.2018, 0.0341, 0.0122, 0.4212, 0.1611, 0.0200]
+################## THINK OF MORE EFFICIENT WAY TO DO THIS - RANDOM CHOICE ###################
+# Startup Coefficeints - Sub_Industries - same probability for each - random choice
+List_of_Sub_Industries = ["Sub_Industry_1", "Sub_Industry_2", "Sub_Industry_3", "Sub_Industry_4", "Sub_Industry_5"]
+Probability_Distribution_of_Sub_Industries = [0.2, 0.2, 0.2, 0.2, 0.2]
 
 ######################### COME UP WITH OWN COEFFICIENTS ############################
 # Startup Coefficients - Due Diligence
@@ -140,7 +139,7 @@ class VC(Agent):
         
     # This function enables us to map final revenue growth (startup potential) into returns
     def Growth_to_returns(self, growth):
-        # This gives us probability of observing a growth less or equal to observed vlaue
+        # This gives us probability of observing a growth less or equal to observed value - using the same probability distribution here (the average)
         Growth_cdf = skewnorm.cdf(growth, Growth_a, Growth_loc, Growth_scale)
 
         # return distribution of returns mapped from the final revenue growth data
@@ -149,57 +148,12 @@ class VC(Agent):
     ######################### CHECK THIS AND WHAT TO INCLUDE #####################
     # Projects growth for startups into the future
     def projected_time_progression(self, growth):
-        updated_growth = Alpha*growth + Beta*self.VC_quality + np.random.normal(Idiosyncratic_shock_mean, Idiosyncratic_shock_sd)\
-        + np.random.normal(Industry_shock_mean, Industry_shock_sd) + np.random.normal(Macro_shock_mean, Macro_shock_sd)
+        updated_growth = Alpha*growth + Beta*self.VC_quality + np.random.normal(Idiosyncratic_shock_mean, Idiosyncratic_shock_sd)
         return updated_growth
     
 
-    ###################### MAY NOT NEED THIS AS WE ARE USING SORTINO RATIO INSTEAD OF SHARPE - DOWNSIDE DEVIATION INSTEAD OF VARIANCE ######################################
-    """
-    ## The next three functions calculates the expected covariance for the whole portfolio
-    # Calculates expected covariance between two startups
-    def expected_covariance(self, startup_1, startup_2):
-        # calculates the time from present until one of the startups exits - time left together in the portfolio
-        time_left_together = Startup_exit - max(getattr(startup_1, "Life_stage"), getattr(startup_2, "Life_stage"))
-
-        ######################### CHECK INDUSTRY AND MACRO SHOCKS, AND CHECK FORMULAE (FOR SUMMATION AND RETURN FORMULA) ##############################
-        # Since growth_final boils down to growth_final ≈ Alpha^20*growth_0 + (Alpha^19 + Alpha^18 + ...+ 1)* (Beta*Advising + Average_Idiosyncratic_shock + Average_Industry_shock + Average_Macro_shock)
-        alpha_summation_1 = ((1 - Alpha**time_left_together)/(1-Alpha))
-        alpha_summation_2 = ((1 - Alpha**time_left_together)/(1-Alpha))
-        Industry_correlation =  float(Correlation_matrix.loc[getattr(startup_1, "Industry")[0], getattr(startup_2, "Industry")[0]]) 
-
-        return float(alpha_summation_1*alpha_summation_2*Industry_correlation*Industry_shock_sd**2 + alpha_summation_1*alpha_summation_2*Macro_shock_sd**2)
-    
-    # Calculates variance for one startup
-    def expected_variance(self, startup):
-        alpha_sumation_1 = ((1 - Alpha**(Startup_exit - getattr(startup, "Life_stage")))/(1-Alpha))
-        alpha_sumation_2 = ((1 - Alpha**(1 + Startup_exit - getattr(startup, "Life_stage")))/(1-Alpha))  
-
-        ################# CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION, ALSO CHECK RETURN FORMULA #####################              
-        if getattr(startup, "Life_stage") == 0:
-            noise = Noise_sd_after_DD
-        else:
-            # noise is reduced as startup matures
-            noise = Noise_sd_after_DD/(getattr(startup, "Life_stage")**(1/2))
-
-        return alpha_sumation_1**2*noise**2 + alpha_sumation_2**2*Idiosyncratic_shock_sd**2 + alpha_sumation_2**2*Industry_shock_sd**2 + alpha_sumation_2**2*Macro_shock_sd**2                                                                                        
-
-    # Calculates the expected variance for the whole portfolio 
-    def expected_portfolio_variance(self, Portfolio):
-        if len(Portfolio) == 1:
-            return self.expected_variance(Portfolio[0][0])
-        else:
-            Total_variance = 0
-            for i in Portfolio:
-                for j in Portfolio:
-                    # Total variance is sum of variances and covariances
-                    if i != j:
-                        Total_variance = (i[2]*j[2]*self.expected_covariance(i[0], j[0])) + Total_variance
-                    if i == j:
-                        Total_variance = (i[2]**2*self.expected_variance(i[0])) + Total_variance
-            return Total_variance
-    """
-                                    
+   ############################# THIS IS NOT USED #########################
+    """                                 
     # Calculates the expected return of a Portfolio
     def expected_return(self, Portfolio):
         Return = 0
@@ -213,10 +167,9 @@ class VC(Agent):
                 for j in range(0,(Startup_exit-getattr(i[0],"Life_stage"))): 
                     # for each time step left for the startup, project its perceived growth                   
                     Projected_Growth = self.projected_time_progression(Perceived_Growth)
-
-                    #################### CHECK THIS NORMALISATION BETWEEN 0 AND 1 - CHECK IF APPLICABLE TO REVENUE GROWTH #####################
-                    if Projected_Growth < 0:
-                        Projected_Growth = 0
+                    # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% (too extreme - 256 multiple)
+                    if Projected_Growth < -1:
+                        Projected_Growth = -0.99
                     if Projected_Growth > 1:
                         Projected_Growth = 0.99
                 
@@ -224,6 +177,7 @@ class VC(Agent):
                 Return = float((self.Growth_to_returns(Projected_Growth)*i[2])) + Return
             return Return
     
+    """
 
 
     # Calculates the expected return without time projection - based only on the current perceived return
@@ -234,12 +188,6 @@ class VC(Agent):
         else:
             for i in Portfolio:
                 Projected_Growth = getattr(i[0], "Growth_after_DD")
-
-                #################### CHECK THIS NORMALISATION BETWEEN 0 AND 1 - CHECK IF APPLICABLE TO REVENUE GROWTH #####################
-                if Projected_Growth < 0:
-                    Projected_Growth = 0
-                if Projected_Growth > 1:
-                    Projected_Growth = 0.99
 
                 ################## CHECK THIS FORMULA AS FOR THE EXPECTED_RETURN FUNCTION ######################
                 Return = float((self.Growth_to_returns(Projected_Growth)*i[2]))+ Return
@@ -260,12 +208,6 @@ class VC(Agent):
         sigma_d = 0
         for i in Portfolio:
             Projected_Growth = getattr(i[0], "Growth_after_DD")
-
-            #################### CHECK THIS NORMALISATION BETWEEN 0 AND 1 - CHECK IF APPLICABLE TO REVENUE GROWTH #####################
-            if Projected_Growth < 0:
-                Projected_Growth = 0
-            if Projected_Growth > 1:
-                Projected_Growth = 0.99
             # calculate expected deviation from target return for each startup
             Dev = float(self.Growth_to_returns(Projected_Growth) - Risk_free_rate)
             Dev_squared = Dev**2
@@ -273,7 +215,7 @@ class VC(Agent):
             if Dev < 0:
                 sigma_d = sigma_d + Dev_squared       
         # calculate the expected downside deviation from the sum of the downside squared deviations
-        sigma_d = sigma_d/len(Portfolio)
+        sigma_d = sigma_d/(len(Portfolio) -1)
         sigma_d = sigma_d**(1/2)
 
         return sigma_d
@@ -309,7 +251,7 @@ class VC(Agent):
                 return torch.tensor([0])
             # If action is more than 0.005 but less than 1, then VC invests in startup
             if 0.005<=action<=1 and action <= self.Endowement:
-                return torch.tensor([(self.expected_portfolio_coefficient((self.Portfolio + [list(startup) + list(action)])) - self.expected_portfolio_coefficient(self.Portfolio))])
+                return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
             # If there is not enough endowment, no investment occurs
             if 0.005<=action<=1 and action > self.Endowement:
                 return torch.tensor([-100*(action[0]-self.Endowement)])
@@ -326,13 +268,10 @@ class VC(Agent):
         ## Prospect attributes
         # Attribtue 1 - prospect growth as perceived by agent (VC)
         Prospect_Growth = getattr(Prospect[0], "Growth_after_DD")
-        # Attribute 2 - average industry correlation of prospect with portfolio
-        Industry_correlation = 0
-        for i in self.Portfolio:    
-            Industry_correlation =  float(Correlation_matrix.loc[getattr(Prospect[0], "Industry")[0], getattr(i[0], "Industry")[0]]) + Industry_correlation
-        Average_correlation_with_portfolio = 0
-        if self.Portfolio_size != 0:
-            Average_correlation_with_portfolio = Industry_correlation/self.Portfolio_size
+
+        ################ CHECK THIS TO SEE APPROPRIATE ATTRIBUTE FOR AGENT TO SEE - MAYBE SUBINDUSTRY STANDARD DEVIATION? #######################
+        # Attribute 2 - prospect sub-industry
+        Sub_Industry = getattr(Prospect[0], "Sub_Industry")[0]
         
         ################ SEE THIS AS THIS SEEMS TO BE FOR COHORT OF POSSIBLE SCREENINGS, NOT ACTUAL SCREENINGS ###################
         ## Cohort attributes
@@ -373,7 +312,7 @@ class VC(Agent):
         # Attribute 10 - Remaining of investment stage as a percentage
         Remaining_of_investment_stage = Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
         
-        state_ = torch.tensor([Prospect_Growth, Average_correlation_with_portfolio, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+        state_ = torch.tensor([Prospect_Growth, Sub_Industry, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
         return state_
     
     # Gets next state 
@@ -383,8 +322,10 @@ class VC(Agent):
         # Startup_in_portfolio = 0
         # Attribute 1 - prospect growth as perceived by agent (VC)
         Prospect_growth = 0
-        # Attribute 2 - average industry correlation of prospect with portfolio
-        Average_correlation_with_portfolio = 0
+
+        ################ CHECK THIS TO SEE APPROPRIATE ATTRIBUTE FOR AGENT TO SEE - MAYBE SUBINDUSTRY STANDARD DEVIATION? #######################
+        # Attribute 2 - prospect subindustry
+        Sub_Industry = 0
         
         ################ SEE THIS AS THIS SEEMS TO BE FOR COHORT OF POSSIBLE SCREENINGS, NOT ACTUAL SCREENINGS ###################
         ## Cohort attributes
@@ -420,12 +361,12 @@ class VC(Agent):
         Percentage_screening_left = self.Effort_left_for_screening/(Time_for_screening_and_monitroring_3months_per_emp_per_fund*self.Investment_analysts)
         # Attribute 8 - VC quality
         VC_quality = self.VC_quality
-        # Attribute 9 - Endowment left ############################# CHECK THIS #####################
+        # Attribute 9 - Endowment left (1 at the beginning)
         Endowement = self.Endowement
         # Attribute 10 - Remaining of investment stage as a percentage
         Remaining_of_investment_stage = Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
         
-        next_state_ = torch.tensor([Prospect_growth, Average_correlation_with_portfolio, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+        next_state_ = torch.tensor([Prospect_growth, Sub_Industry, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
         return next_state_
     
     # Executes the changes that occur at each time step
@@ -472,12 +413,13 @@ class VC(Agent):
 
 
 class Startup(Agent):
-    def __init__(self, unique_id, Growth, Industry, Life_stage, model):
+    def __init__(self, unique_id, Growth, Sub_Industry, Life_stage, model):
         self.unique_id = unique_id
         self.model = model
-        self.Industry = Industry
+        self.Sub_Industry = Sub_Industry
         self.Growth = Growth
         self.Life_stage = Life_stage
+        
         ##################### CHECK THIS ######################
         self.EPI_with_noise = 0
 
@@ -498,14 +440,14 @@ class Startup(Agent):
     
     # Startup progress in time                           
     def time_progression(self):
-        self.Growth = Alpha*self.Growth + Beta*self.average_investor_quality() + np.random.normal(Idiosyncratic_shock_mean, Idiosyncratic_shock_sd)\
-        + np.random.normal(Industry_shock_mean, Industry_shock_sd) + np.random.normal(Macro_shock_mean, Macro_shock_sd)
-        self.Life_stage += 1
-        ################################# CHECK NORMALISATION #############################
+        self.Growth = Alpha*self.Growth + Beta*self.average_investor_quality() + np.random.normal(Idiosyncratic_shock_mean, Idiosyncratic_shock_sd)
+        self.Life_stage += 1    
+        # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% (too extreme - 256 multiple)
+        if self.Growth < -1:
+            self.Growth = -0.99
         if self.Growth > 1:
             self.Growth = 0.99
-        if self.Growth < 0:
-            self.Growth = 0
+
 
     ################################ CHECK HOW TO REMOVE THIS ###############################                                
     def noise_before_screening(self):
@@ -540,12 +482,14 @@ class Startup(Agent):
         self.noise_before_screening()
         self.noise_after_screening()
         #Collecting the prospects for this time step, 
+
         ############################ WHY THIS? #############################
         #0.450 and 0.570 correspond to levels of EPI that give return greater than 2
         if self.Life_stage == 0 and self.EPI_with_noise > 0.450:
             world.Early_stage_prospects.append(self)
         if self.Life_stage == 8 and self.EPI_with_noise > 0.570:
             world.Late_stage_prospects.append(self) 
+
         # We also make all the startups progress in time    
         self.time_progression()  
         
@@ -601,10 +545,11 @@ class World(Model):
     # Creating Agents - Startups_early stage
     def generate_startups(self):        
         for j in range (Number_of_VCs + self.schedule_1.steps*Number_of_new_startups, Number_of_VCs +  (self.schedule_1.steps+1)*Number_of_new_startups):
-
-            ############################# APPLY GROWTH FUNCTION HERE ###############################
-            b = Startup(j, powerlaw.rvs(EPI_alpha, EPI_loc, EPI_scale),random.choices(List_of_Industries, Probability_Distribution_of_Industries),0, self)
-
+            # Get a sub-industry by random choice 
+            Sub_Industry = random.choices(List_of_Sub_Industries, Probability_Distribution_of_Sub_Industries)
+            # create the startup, and assign a revenue growth based on the distribution corresponding to the sub-industry
+            b = Startup(j, skewnorm.rvs(Growth_a, Sub_Industry_loc[Sub_Industry], Sub_Industry_scale[Sub_Industry]), Sub_Industry, 0, self)
+            # add the startup to the schedule
             self.schedule_1.add(b)         
        
             
@@ -660,19 +605,19 @@ Portfolio_data = []
 for i in world.VCs:
     for j in i.Portfolio:
         
-        ############## CHECK IF THIS SHOULD BE Growth OR growth #######################
+        ############## CHECK IF THIS SHOULD BE Growth OR growth - THIS MAKES SENSE WITH LINE df2 BELOW - MEANS THAT FOR i in PORTFOLIO, i[0] IS STAGE, i[1] IS ENDOWMENT, i[2] IS GROWTH AFTER DD, AND i[3] IS FUND AGE #######################
         Transit = [i.unique_id, j[0].unique_id, j[0].Growth, i.Growth_to_returns(j[0].Growth, j[1])]
 
-        ######################## SEE WHY j[0] IS NOT INCLUDED, AND WHY ONLY INDUSTRY FROM J[0]??? #######################
+        ######################## SEE WHY j[0] IS NOT INCLUDED, AND WHY ONLY SUB-INDUSTRY FROM J[0]??? #######################
         # Access elements from j[1] onwards - do not include j[0]
         for z in j[1:]:
             Transit.append(z)
-        Transit.append(j[0].Industry[0])
+        Transit.append(j[0].Sub_Industry[0])
 
         Portfolio_data = [Transit] + Portfolio_data   
 
 ########################## CHECK THE COLUMNS ARE RIGHT, ESPECIALLY WITH "Stage" ######################
 # Export the portfolio data to an Excel spreadsheet
-df2 = pd.DataFrame(np.array(Portfolio_data), columns = ["Unique_id_VC", "Unique_id_Startup", "Growth_final", "Return", "Stage","Amount_Invested", "Growth_after_DD", "Fund_age", "Industry"])
+df2 = pd.DataFrame(np.array(Portfolio_data), columns = ["Unique_id_VC", "Unique_id_Startup", "Growth_final", "Return", "Stage","Amount_Invested", "Growth_after_DD", "Fund_age", "Sub_Industry"])
 df2.to_excel("Portfolio_data.xlsx")
 print(df2) 
