@@ -27,13 +27,11 @@ np.random.seed(0) # enables consisent outputs from random number generation
 # VC Coefficients - general
 Number_of_VCs = 100 # as a starting point 
 Fund_maturity = 32 # number of time steps to realise returns (8 years) - each time step is 3 months (one quarter)
-
-#################### CHECK VC QUALITY DISTRIBUTION (lognormal for TVPI), VC_QUALITY NORMALISATION, AND AVERAGE PORTFOLIO SIZE (AND ITS USE) ######################
-VC_quality_shape = 0.39 # shape coefficient for lognormal distribution
-VC_quality_loc = -0.49 # location coefficient for lognormal distribution
-VC_max_scale = 1.70 # scale coefficient for lognormal distribution
-VC_max_scale = 1 # we want to normalize VC_quality so that it lies between 0 and 1
 Average_portfolio_size = 32 #Based on real world data
+VC_quality_shape = 0.385 # shape coefficient for lognormal distribution
+VC_quality_loc = -0.485 # location coefficient for lognormal distribution
+VC_quality_scale = 1.701 # scale coefficient for lognormal distribution
+
 
 #################### CHANGE THIS ########################
 #VC attributes - Employees
@@ -140,8 +138,11 @@ class VC(Agent):
         
     # This function enables us to map final revenue growth (startup potential) into returns
     def Growth_to_returns(self, growth):
+
+        ###################### SHOULD I DO A LOC AND SCALE PARAMETER FOR EACH SUBINDUSTRY HERE? #######################
         # This gives us probability of observing a growth less or equal to observed value - using the same probability distribution here (the average)
         Growth_cdf = skewnorm.cdf(growth, Growth_a, Growth_loc, Growth_scale)
+
         # return distribution of returns mapped from the final revenue growth data
         return float(sampled_VC_return_data[int(sample_size*Growth_cdf)])
     
@@ -276,7 +277,7 @@ class VC(Agent):
             for i in self.Portfolio:
                 growths.append(getattr(i[0], "Growth_after_DD"))
             Portfolio_sd = np.std(growths)
-            
+        
         ## VC attributes
         # Attribute 7 - percentage of total screening capacity left, given a portfolio size
         Percentage_screening_left = self.Effort_left_for_screening/(Time_for_screening_and_monitroring_3months_per_emp_per_fund*self.Investment_analysts)
@@ -330,7 +331,7 @@ class VC(Agent):
             for i in self.Portfolio:
                 EPIs.append(getattr(i[0], "Growth_after_DD"))
             Portfolio_sd = np.std(EPIs)
-            
+        
         ## VC attributes
         # Attribute 7 - percentage of total screening capacity left, given a portfolio size
         Percentage_screening_left = self.Effort_left_for_screening/(Time_for_screening_and_monitroring_3months_per_emp_per_fund*self.Investment_analysts)
@@ -357,7 +358,7 @@ class VC(Agent):
                         
                         ############################## WHY VC_INVESTMENTS? - SEEMS LIKE IT COULD BE THE VC INVESTMENTS IN A PARTICULAR STARTUP ################################
                         i[0].VC_investments.append(self)
-                        self.Portfolio.append(i+[float(act)]+[float(getattr(i[0],"Growth_after_screening"))]+[float(self.Fund_age)]) # add the startup to the portfolio
+                        self.Portfolio.append(i+[float(act)]+[float(getattr(i[0],"Growth_after_DD"))]+[float(self.Fund_age)]) # add the startup to the portfolio
                         self.Endowement = self.Endowement - float(act) # subtract action (investment) from endowment
                     new_state = self.get_next_state(act, obs) # get the next state based on the action and the observation
                     agent.remember(obs, act, reward, new_state, int(end)) # store the memory (s,a,r,s') in the replay buffer
@@ -438,20 +439,21 @@ class Startup(Agent):
                 self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
 
 
-    ############################# MODIFY THIS NOISE BASED ON VC QUALITY ###########################
     def noise_after_DD(self):
+        # VC_quality cannot be implemented here as there may be no potential or actual investors yet, so growth_with_noise used as an approxmation to the quality of/
+        # the VC that performs DD on the startup, as the matching is done between growth_with_noise and VC_quality, so it makes sense
+        noise_reduction_VC_quality = skewnorm.cdf(self.Growth_with_noise, Growth_a, Growth_loc, Growth_scale)
         if self.Life_stage == 0:
-            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
-            while self.Growth_after_DD > 1 or self.Growth_after_DD < 0:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
-        else:
-            ################################ CHECK NOISE REDUCTION WITH TIME - ALSO CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION ###############################  
-            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
+            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)) # (1 - VC_quality) done so that a greater VC quality reduces the noise more
             while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
-    
+                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
+        else:
 
-    ############################# CHANGE THIS TO REMOVE THE NOISE BEFORE SCREENING #########################
+            ################################ CHECK NOISE REDUCTION WITH TIME - ALSO CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION ###############################  
+            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
+            while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
+                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
+    
     # Executes the changes that occur at each time step
     def step(self):
         #self.VC_potential_investments.sort(key = lambda x: x.VC_quality, reverse=True)
@@ -505,12 +507,8 @@ class World(Model):
         
         # Creating Agents - VC
         for i in range (Number_of_VCs):
-
-            ######################### CHANGE THIS WHEN NORMALISATION OF VC QUALITY IS WORKED OUT ############################
-            a = VC(i,float(theoretical_distribution_VC.generate_random(1)/VC_max_TVPI),int(lognorm.rvs(Number_of_employees_sd, Number_of_employees_loc, Number_of_employees_scale)),0,self)
-            while a.VC_quality>1:
-                a.VC_quality = float(theoretical_distribution_VC.generate_random(1)/VC_max_TVPI)
-
+            # for VC quality, draw a TVPI based on the TVPI distribution for VC quality, and normalise by taking the cdf - normalisaiton between 0 and 1 is needed for noise after DD
+            a = VC(i,float(lognorm.cdf(lognorm.rvs(VC_quality_shape, VC_quality_loc, VC_quality_scale), VC_quality_shape, VC_quality_loc, VC_quality_scale)),int(lognorm.rvs(Number_of_employees_sd, Number_of_employees_loc, Number_of_employees_scale)),0,self)
             self.schedule_2.add(a)
             self.VCs.append(a)
         
