@@ -73,8 +73,8 @@ Sub_Industry_loc = {"Sub_Industry_1": 0.475, "Sub_Industry_2": 0.530, "Sub_Indus
 Sub_Industry_scale = {"Sub_Industry_1": 0.466, "Sub_Industry_2": 0.520, "Sub_Industry_3": 0.543, "Sub_Industry_4": 0.565, "Sub_Industry_5": 0.621}
 
 ############### CHANGE THIS ###################
-#Startup Coefficients - Time progression equation
-#Gorwth = Alpha*Growth + Beta*VC + Idiosyncratic_shock
+# Startup Coefficients - Time progression equation
+# Gorwth = Alpha*Growth + Beta*VC + Idiosyncratic_shock
 Alpha = 0.99 #alpha coefficient for time progression equation. Expresses weight of EPI
 Beta = 0.01 #beta coefficient for time progression equation. Expresses the weight of VC 
 Idiosyncratic_shock_mean = 0 #mean for normal distribution for idiosyncratic shock
@@ -87,13 +87,14 @@ Probability_Distribution_of_Sub_Industries = [0.2, 0.2, 0.2, 0.2, 0.2]
 
 ######################### COME UP WITH OWN COEFFICIENTS ############################
 # Startup Coefficients - Due Diligence
-Noise_mean_after_DD = 0 # mean for normal distribution of noise after due diligence
-Noise_sd_after_DD = 0.25 # standard deviation for normal distribution of noise after due diligence
+Noise_mean_before_DD = 0 # mean for normal distribution of noise before due diligence
+# Standard deviation for normal distribution of noise before due diligence
+Noise_sd_before_DD = {"Sub_Industry_1": 0.307, "Sub_Industry_2": 0.342, "Sub_Industry_3": 0.357, "Sub_Industry_4": 0.372, "Sub_Industry_5": 0.407} 
 
 ################# GET RID OF NEED OF MAX MUMBER, CHECK NUMBER OF DUE DILIGENCE INVESTORS ####################
 # Startup Coefficients - Investors
 Max_investments_per_startup = 1 # max number of investors allowed to invest in startup, 1 as each startup is in fact treated as an investment
-Number_of_due_diligence_investors = 10 # number of investors enagaged in due diligence
+Number_of_due_diligence_investors = 10 # number of investors enagaged in due diligence per startup
 
 
 ## A sample of VC returns, used for mapping of revenue growth at exit -> to VC return
@@ -141,51 +142,25 @@ class VC(Agent):
     def Growth_to_returns(self, growth):
         # This gives us probability of observing a growth less or equal to observed value - using the same probability distribution here (the average)
         Growth_cdf = skewnorm.cdf(growth, Growth_a, Growth_loc, Growth_scale)
-
         # return distribution of returns mapped from the final revenue growth data
         return float(sampled_VC_return_data[int(sample_size*Growth_cdf)])
     
+
     ######################### CHECK THIS AND WHAT TO INCLUDE #####################
     # Projects growth for startups into the future
     def projected_time_progression(self, growth):
         updated_growth = Alpha*growth + Beta*self.VC_quality + np.random.normal(Idiosyncratic_shock_mean, Idiosyncratic_shock_sd)
         return updated_growth
-    
-
-   ############################# THIS IS NOT USED #########################
-    """                                 
-    # Calculates the expected return of a Portfolio
-    def expected_return(self, Portfolio):
-        Return = 0
-        # no return if there are no startups in the portfolio
-        if len(Portfolio) == 0:
-            return 0
-        else:
-            for i in Portfolio:
-                # growth perceived by agent (VC)
-                Perceived_Growth = getattr(i[0], "Growth_after_DD")
-                for j in range(0,(Startup_exit-getattr(i[0],"Life_stage"))): 
-                    # for each time step left for the startup, project its perceived growth                   
-                    Projected_Growth = self.projected_time_progression(Perceived_Growth)
-                    # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% (too extreme - 256 multiple)
-                    if Projected_Growth < -1:
-                        Projected_Growth = -0.99
-                    if Projected_Growth > 1:
-                        Projected_Growth = 0.99
-                
-                ##################### CHECK WHY IS IT MULTIPLIED BY i[2] AND + RETURN - SEEMS LIKE i[2] IS ENDOWMENT/WEIGHT ASSIGNED TO STARTUP, BUT LINE 420 SUGGESTS OTHERWISE #####################
-                Return = float((self.Growth_to_returns(Projected_Growth)*i[2])) + Return
-            return Return
-    
-    """
 
 
     # Calculates the expected return without time projection - based only on the current perceived return
-    def expected_return_without_projection(self, Portfolio):
+    def expected_return(self, Portfolio):
         Return = 0
+        # No return if no startups in the portfolio
         if len(Portfolio) == 0:
             return 0
         else:
+            # Get expected return based on the current revenue growth
             for i in Portfolio:
                 Projected_Growth = getattr(i[0], "Growth_after_DD")
 
@@ -227,7 +202,7 @@ class VC(Agent):
             return 0
         else:
             ###################### WHY RETURN WITHOUT PROJECTION? ################################
-            return float(self.expected_return_without_projection(Portfolio) - Risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
+            return float(self.expected_return(Portfolio) - Risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
     
 
     # Returns 1 if a startup is in the portfolio, and 0 otherwise
@@ -419,10 +394,7 @@ class Startup(Agent):
         self.Sub_Industry = Sub_Industry
         self.Growth = Growth
         self.Life_stage = Life_stage
-        
-        ##################### CHECK THIS ######################
-        self.EPI_with_noise = 0
-
+        self.Growth_with_noise = 0
         self.Growth_after_DD = 0
         self.VC_potential_investments = []
         self.VC_investments = []
@@ -449,28 +421,36 @@ class Startup(Agent):
             self.Growth = 0.99
 
 
-    ################################ CHECK HOW TO REMOVE THIS ###############################                                
-    def noise_before_screening(self):
+    def noise_before_DD(self):
+        # If the startup is new, the full noise is applied
         if self.Life_stage == 0:
-            self.EPI_with_noise = self.EPI + np.random.normal(Noise_mean_before_screening_ES, Noise_standard_deviation_before_screening_ES)
-            while self.EPI_with_noise>1 or self.EPI_with_noise<0:
-                self.EPI_with_noise = self.EPI + np.random.normal(Noise_mean_before_screening_ES, Noise_standard_deviation_before_screening_ES)
+            self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
+            # Repeat noise if the revenue growth goes outside the limits - too extreme
+            while self.Growth_with_noise > 1 or self.Growth_with_noise < -1:
+                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
+
+        ################################ CHECK NOISE REDUCTION WITH TIME - ALSO CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION ###############################     
+        # If the startup is not new, the nosie is reduced in proportion to the maturity of the startup
         else:
-            self.EPI_with_noise = self.EPI + np.random.normal(Noise_mean_before_screening_ES, Noise_standard_deviation_before_screening_ES/(self.Life_stage**(1/2)))
-            while self.EPI_with_noise>1 or self.EPI_with_noise<0:
-                self.EPI_with_noise = self.EPI + np.random.normal(Noise_mean_before_screening_ES, Noise_standard_deviation_before_screening_ES/(self.Life_stage**(1/2)))
-    
-    def noise_after_screening(self):
+            self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
+            # Repeat noise if the revenue growth goes outside the limits - too extreme
+            while self.Growth_with_noise > 1 or self.Growth_with_noise < -1:
+                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
+
+
+    ############################# MODIFY THIS NOISE BASED ON VC QUALITY ###########################
+    def noise_after_DD(self):
         if self.Life_stage == 0:
-            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_after_DD, Noise_sd_after_DD)
-            while self.Growth_after_DD>1 or self.Growth_after_DD<0:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_after_DD, Noise_sd_after_DD)
+            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
+            while self.Growth_after_DD > 1 or self.Growth_after_DD < 0:
+                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
         else:
-            ################# CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION ###################
-            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_after_DD, Noise_sd_after_DD/(self.Life_stage**(1/2)))
-            while self.Growth_after_DD>1 or self.Growth_after_DD<0:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_after_DD, Noise_sd_after_DD)
+            ################################ CHECK NOISE REDUCTION WITH TIME - ALSO CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION ###############################  
+            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
+            while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
+                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
     
+
     ############################# CHANGE THIS TO REMOVE THE NOISE BEFORE SCREENING #########################
     # Executes the changes that occur at each time step
     def step(self):
@@ -479,15 +459,15 @@ class Startup(Agent):
             #self.VC_investments.append(i)
         #self.VC_potential_investments = []
         #Updating EPI with noise for startups
-        self.noise_before_screening()
-        self.noise_after_screening()
+        self.noise_before_DD()
+        self.noise_after_DD()
         #Collecting the prospects for this time step, 
 
         ############################ WHY THIS? #############################
         #0.450 and 0.570 correspond to levels of EPI that give return greater than 2
-        if self.Life_stage == 0 and self.EPI_with_noise > 0.450:
+        if self.Life_stage == 0 and self.Growth_with_noise > 0.450:
             world.Early_stage_prospects.append(self)
-        if self.Life_stage == 8 and self.EPI_with_noise > 0.570:
+        if self.Life_stage == 8 and self.Growth_with_noise > 0.570:
             world.Late_stage_prospects.append(self) 
 
         # We also make all the startups progress in time    
@@ -566,7 +546,7 @@ class World(Model):
                     i.VC_potential_investments.append([j])
 
                     index +=1
-                if index == 10:
+                if index == Number_of_due_diligence_investors:
                     break
             index = 0
 
@@ -575,15 +555,13 @@ class World(Model):
         self.Prospects = []
         self.generate_startups()
         self.schedule_1.step()
-
-        ######################### CHECK EPI_WITH_NOISE #######################
-        self.Prospects.sort(key = attrgetter('EPI_with_noise'), reverse = True)
-
+        self.Prospects.sort(key = attrgetter('Growth_with_noise'), reverse = True)
         self.matching_prospects_to_VCs()
         self.schedule_2.step()
         self.schedule_1.steps += 1
         self.schedule_1.time += 1
         #self.datacollector.collect(self)
+
 
 # Perform steps - simulation
 world = World(Number_of_VCs, Number_of_new_startups)
