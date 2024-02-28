@@ -19,41 +19,38 @@ from operator import attrgetter
 from SSTD3 import Agent, ReplayBuffer, OUNoise, Critic, Actor, Softmax
 import torch
 
+####################### CHECK STATE DIM ####################################
 agent = Agent(state_dim = 12, action_dim = 1, batch_size = 64) # Initialise the agent
+
 np.random.seed(0) # enables consisent outputs from random number generation
 """ agent.load_model_parameters() """ # load the trained model parameters for all the networks
 
 ## VC Coefficients
 # VC Coefficients - general
-Number_of_VCs = 100 # as a starting point 
-Fund_maturity = 32 # number of time steps to realise returns (8 years) - each time step is 3 months (one quarter)
+Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
+Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
 Average_portfolio_size = 32 #Based on real world data
 VC_quality_shape = 0.385 # shape coefficient for lognormal distribution
 VC_quality_loc = -0.485 # location coefficient for lognormal distribution
 VC_quality_scale = 1.701 # scale coefficient for lognormal distribution
 
 
-#################### CHANGE THIS ########################
-#VC attributes - Employees
-Number_of_employees_sd = 1.3711 #standard deviation coefficinet for lognormal distribution of number of employees
-Number_of_employees_loc = 0.8426 #loc coefficient for lognormal distribution of number of employees
-Number_of_employees_scale = 9.5626 #scale coefficient for lognormal distribution of number of employees
-VC_work_hours_per_week = 56 #Average numebr of hours worked by an analyst in VC
-Work_weeks_per_month = 4 
-Work_hours_per_month = VC_work_hours_per_week*Work_weeks_per_month #Work hours per months per employee in VC
-Work_hours_per_3months = Work_hours_per_month*3 #1 time step = 3 months, thus we are interested in hours per 3 months
-Percentage_of_time_spend_on_other_activities = 0.31 #time spend by VC employee on activitties not related to either screening or advising
-Time_for_screening_and_monitroring_3months_per_emp = Work_hours_per_3months*(1-Percentage_of_time_spend_on_other_activities)
-Number_of_funds_at_operation = 2 #at same time, VC takes care of multiple funds
-Time_for_screening_and_monitroring_3months_per_emp_per_fund = Time_for_screening_and_monitroring_3months_per_emp/Number_of_funds_at_operation
-Average_number_of_investment_analysts = 19 #Based on real-world data
+# VC attributes - Employees
+# List and corresponding probabilities of number of investment professionals (here called analysts) in a VC firm - used for calculating total working hours per time step
+Number_of_analysts_list = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25]
+Number_of_analysts_probabilities = [0.3042, 0.2195, 0.1531, 0.0966, 0.0649, 0.0430, 0.0282, 0.0223, 0.0156, 0.0126, 0.0083, 0.0066, 0.0041, 0.0038, 0.0029, 0.0024, 0.0019, 0.0017, 0.0012, 0.0011, 0.0012, 0.0012, 0.0010, 0.0012, 0.0011]
+Hours_per_week_analyst = 50 # Number of hours worked by an analyst in a VC firm
+Weeks_per_quarter = 13 # 52 weeks per year, so 13 weeks per quarter 
+Hours_per_quarter_analyst = Hours_per_week_analyst*Weeks_per_quarter # 1 time step = 3 months = 1 quarter
+Percentage_of_time_on_other_activities = 0.3 # Time spend by VC employee on activitties not related to either screening/DD or advising (e.g., fundraising)
+Time_for_DD_and_advising_per_analyst = Hours_per_quarter_analyst*(1-Percentage_of_time_on_other_activities) # per quarter
+Number_of_funds_per_VC = 1 # 89.5% of VC firms only manage one fund (an no firms manage more than 7), so we assume one fund for all VCs
+Time_for_DD_and_advising_per_analyst_per_fund = Time_for_DD_and_advising_per_analyst/Number_of_funds_per_VC # per quarter - this is the number used for later calculations
 
-#################### CHANGE THIS #######################
-#VC Coefficients - Time needed
-Screening_time = 60 #Time in hours needed to screen a startup
-Advising_time = 27.5 #Time in hours needed per time step(i.e. 3 months) to advise to a startup in the portfolio 
+# VC Coefficients - Time needed
+DD_time = 60 # Time in hours needed to perform due diligence a startup
+Advising_time = 45 # Time in hours needed per time step (i.e. 3 months) to advise to a startup in the portfolio 
 
-#################### CHECK NUMBER OF TIME STEPS TO EXIT ##############################
 # VC Coefficients - Returns
 VC_returns_alpha = 2.06 # alpha coefficient for power law distribution of VC retruns
 VC_returns_x_min = 0 # X_min coefficeint for power law distribution of early stage returns
@@ -62,7 +59,8 @@ Startup_exit = 20 # number of time steps it takes a startup to exit (5 years)
 #################### CHECK NUMBER OF NEW STARTUPS #########################
 ##Startup Coefficients
 #Startup Coefficients - General
-Number_of_new_startups = 25600 #Number of business starts in USA every 3 months, In fact, it is 256000, but for computational reasons we devide everything by 10
+VCs_to_new_startups_ratio = 260 #The ratio of number of VCs to new startups every quarter worldwide
+Number_of_new_startups = Number_of_VCs*VCs_to_new_startups_ratio #Applies ratio to estimate the appropriate number of new startups per time step for the model
 Growth_a = -2.89 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
 Growth_loc = 0.55 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
 Growth_scale = 0.54 # scale parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
@@ -78,20 +76,16 @@ Beta = 0.01 #beta coefficient for time progression equation. Expresses the weigh
 Idiosyncratic_shock_mean = 0 #mean for normal distribution for idiosyncratic shock
 Idiosyncratic_shock_sd = 0.0775 #standard deviation for normal distribtion for idiosyncratic shock
 
-################## THINK OF MORE EFFICIENT WAY TO DO THIS - RANDOM CHOICE ###################
 # Startup Coefficeints - Sub_Industries - same probability for each - random choice
 List_of_Sub_Industries = ["Sub_Industry_1", "Sub_Industry_2", "Sub_Industry_3", "Sub_Industry_4", "Sub_Industry_5"]
 Probability_Distribution_of_Sub_Industries = [0.2, 0.2, 0.2, 0.2, 0.2]
 
-######################### COME UP WITH OWN COEFFICIENTS ############################
 # Startup Coefficients - Due Diligence
 Noise_mean_before_DD = 0 # mean for normal distribution of noise before due diligence
 # Standard deviation for normal distribution of noise before due diligence
 Noise_sd_before_DD = {"Sub_Industry_1": 0.307, "Sub_Industry_2": 0.342, "Sub_Industry_3": 0.357, "Sub_Industry_4": 0.372, "Sub_Industry_5": 0.407} 
 
-################# GET RID OF NEED OF MAX MUMBER, CHECK NUMBER OF DUE DILIGENCE INVESTORS ####################
 # Startup Coefficients - Investors
-Max_investments_per_startup = 1 # max number of investors allowed to invest in startup, 1 as each startup is in fact treated as an investment
 Number_of_due_diligence_investors = 10 # number of investors enagaged in due diligence per startup
 
 
@@ -106,10 +100,8 @@ for i in simulated_data: # The power law starts with 1, so we have to shift ever
     simulated_data_new.append(i)
 sampled_VC_return_data = sorted(simulated_data_new)
 
-#################### CHECK ESTIMATE OF SCREENINGS ######################
 ## General model coefficents
 Risk_free_rate = 1.103 # Average of 10-Year US Treasury bill and 10-Year German government bond from 2008 to 2024, compounded 5 years
-Estimate_of_screenings = int((Number_of_VCs * Average_number_of_investment_analysts * (Time_for_screening_and_monitroring_3months_per_emp_per_fund/Screening_time))/(Number_of_due_diligence_investors))
 
 ## Here we define class for VC, Startup and Activation
 # VC is assigend a unique id, VC quality and the number of investment analysts
@@ -124,25 +116,22 @@ class VC(Agent):
 
         
         self.Endowement = 1 # endowment normalised to 1
-        ################# SEE HOW SCREENING PROSPECTS IS USED ###################
         self.Screening_prospects = []
         self.Portfolio = []
         self.Portfolio_size = len(self.Portfolio)
 
-        self.Effort_left_for_fund = self.Investment_analysts*Time_for_screening_and_monitroring_3months_per_emp_per_fund
-        self.Effort_allocated_to_startups_in_portfolio = self.Portfolio_size*Advising_time
-        self.Effort_left_for_screening = self.Effort_left_for_fund - self.Effort_allocated_to_startups_in_portfolio
-        self.Number_of_available_screenings = self.Effort_left_for_screening/Screening_time 
+        self.Effort_available = self.Investment_analysts*Time_for_DD_and_advising_per_analyst_per_fund   # Total number of hours available for a fund per time step for DD and advising
+        self.Effort_allocated_to_startups_in_portfolio = self.Portfolio_size*Advising_time # Effort allocated to advising startups currently in the portfolio
+        self.Effort_left_for_DD = self.Effort_available - self.Effort_allocated_to_startups_in_portfolio # Effort left for DD after taking away the effort allocated to advisory
+        self.Number_of_available_screenings = self.Effort_left_for_DD/DD_time # Number of possible screenings per time step based on the effort left for DD
+        
         self.Remaining_of_investment_stage = max(0, (Fund_maturity - Startup_exit - self.Fund_age)) # Investment stage is 3 years, so (8 years - 5 years - fund age)
     
         
     # This function enables us to map final revenue growth (startup potential) into returns
     def Growth_to_returns(self, growth):
-
-        ###################### SHOULD I DO A LOC AND SCALE PARAMETER FOR EACH SUBINDUSTRY HERE? #######################
-        # This gives us probability of observing a growth less or equal to observed value - using the same probability distribution here (the average)
+        # This gives us probability of observing a growth less or equal to observed value - using the same probability distribution for all here (the average)
         Growth_cdf = skewnorm.cdf(growth, Growth_a, Growth_loc, Growth_scale)
-
         # return distribution of returns mapped from the final revenue growth data
         return float(sampled_VC_return_data[int(sample_size*Growth_cdf)])
     
@@ -165,7 +154,7 @@ class VC(Agent):
             for i in Portfolio:
                 Projected_Growth = getattr(i[0], "Growth_after_DD")
 
-                ################## CHECK THIS FORMULA AS FOR THE EXPECTED_RETURN FUNCTION ######################
+                ################## CHECK THIS FORMULA  - WHY i[2]? ######################
                 Return = float((self.Growth_to_returns(Projected_Growth)*i[2]))+ Return
             return Return
 
@@ -202,7 +191,6 @@ class VC(Agent):
         if len(Portfolio) == 0:
             return 0
         else:
-            ###################### WHY RETURN WITHOUT PROJECTION? ################################
             return float(self.expected_return(Portfolio) - Risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
     
 
@@ -244,33 +232,32 @@ class VC(Agent):
         ## Prospect attributes
         # Attribtue 1 - prospect growth as perceived by agent (VC)
         Prospect_Growth = getattr(Prospect[0], "Growth_after_DD")
-
-        ################ CHECK THIS TO SEE APPROPRIATE ATTRIBUTE FOR AGENT TO SEE - MAYBE SUBINDUSTRY STANDARD DEVIATION? #######################
         # Attribute 2 - prospect sub-industry
         Sub_Industry = getattr(Prospect[0], "Sub_Industry")[0]
+        # Attribute 3 - growth standard deviation
+        Growth_sd = Noise_sd_before_DD[Sub_Industry]
         
-        ################ SEE THIS AS THIS SEEMS TO BE FOR COHORT OF POSSIBLE SCREENINGS, NOT ACTUAL SCREENINGS ###################
         ## Cohort attributes
-        # Attibute 3 - average growth of prospects, as perceived by agent (VC)
+        # Attibute 4 - average growth of prospects, as perceived by agent (VC)
         total_cohort = 0
         for i in self.Screening_prospects:
             total_cohort = getattr(i[0], "Growth_after_DD") + total_cohort
         Screenings_mean = total_cohort/len(self.Screening_prospects) 
-        # Attribute 4 - standard deviation of perceived growth of prospects by agent (VC)
+        # Attribute 5 - standard deviation of perceived growth of prospects by agent (VC)
         Screenings = []
         for i in self.Screening_prospects:
             Screenings.append(getattr(i[0], "Growth_after_DD"))
         Screenings_sd = np.std(Screenings)
             
         ## Portfolio attributes
-        # Attribute 5 - mean perceived growth in portfolio by agent (VC)
+        # Attribute 6 - mean perceived growth in portfolio by agent (VC)
         total = 0
         for i in self.Portfolio:
             total = getattr(i[0], "Growth_after_DD") + total
         Portfolio_mean = 0
         if self.Portfolio_size != 0:
             Portfolio_mean = total/self.Portfolio_size
-        #Attribute 6 - standard deviation of perceived growth of portfolio companies by agent (VC)
+        #Attribute 7 - standard deviation of perceived growth of portfolio companies by agent (VC)
         growths = []
         Portfolio_sd = 0
         if self.Portfolio_size != 0:
@@ -279,52 +266,51 @@ class VC(Agent):
             Portfolio_sd = np.std(growths)
         
         ## VC attributes
-        # Attribute 7 - percentage of total screening capacity left, given a portfolio size
-        Percentage_screening_left = self.Effort_left_for_screening/(Time_for_screening_and_monitroring_3months_per_emp_per_fund*self.Investment_analysts)
-        # Attribute 8 - VC quality
+        # Attribute 8 - percentage of total screening/DD capacity left, given a portfolio size
+        Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
+        # Attribute 9 - VC quality
         VC_quality = self.VC_quality
-        # Attribute 9 - Endowment left (1 at the beginning)
+        # Attribute 10 - Endowment left (1 at the beginning)
         Endowement = self.Endowement
-        # Attribute 10 - Remaining of investment stage as a percentage
+        # Attribute 11 - Remaining of investment stage as a percentage
         Remaining_of_investment_stage = Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
         
-        state_ = torch.tensor([Prospect_Growth, Sub_Industry, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+        state_ = torch.tensor([Prospect_Growth, Sub_Industry, Growth_sd, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
         return state_
     
     # Gets next state 
     def get_next_state(self, action, Prospect):
-        ################# I DO NOT GET WHY ACTION AND PROSPECT ARE NOT USED, AND WHY THESE ATTRIBUTES ARE ZERO - MAYBE BECAUSE IT IS NEXT STATE SO PROSPECTS FO NOT MATTER ANY MORE ####################
-        ## Prospect attributes
+        ## Prospect attributes - no prospects on next state, so prospect attributes are null
         # Startup_in_portfolio = 0
         # Attribute 1 - prospect growth as perceived by agent (VC)
         Prospect_growth = 0
-
-        ################ CHECK THIS TO SEE APPROPRIATE ATTRIBUTE FOR AGENT TO SEE - MAYBE SUBINDUSTRY STANDARD DEVIATION? #######################
         # Attribute 2 - prospect subindustry
         Sub_Industry = 0
+        # Attribute 3 - growth standard deviation
+        Growth_sd = 0
         
         ################ SEE THIS AS THIS SEEMS TO BE FOR COHORT OF POSSIBLE SCREENINGS, NOT ACTUAL SCREENINGS ###################
         ## Cohort attributes
-        # Attribute 3 - average growth of prospects, as perceived by agent (VC)
+        # Attribute 4 - average growth of prospects, as perceived by agent (VC)
         total_cohort = 0
         for i in self.Screening_prospects:
             total_cohort = getattr(i[0], "Growth_after_DD") + total_cohort
         Screenings_mean = total_cohort/len(self.Screening_prospects) 
-        # Attribute 4 - standard deviation of perceived growth of prospects by agent (VC)
+        # Attribute 5 - standard deviation of perceived growth of prospects by agent (VC)
         Screenings = []
         for i in self.Screening_prospects:
             Screenings.append(getattr(i[0], "Growth_after_DD"))
         Screenings_sd = np.std(Screenings)
             
         # Portfolio attributes 
-        # Attribute 5 - mean perceived growth in portfolio by agent (VC)
+        # Attribute 6 - mean perceived growth in portfolio by agent (VC)
         total = 0
         for i in self.Portfolio:
             total = getattr(i[0], "Growth_after_DD") + total
         Portfolio_mean = 0
         if self.Portfolio_size != 0:
             Portfolio_mean = total/self.Portfolio_size
-        # Attribute 6 - standard deviation of perceived growth of portfolio companies by agent (VC)
+        # Attribute 7 - standard deviation of perceived growth of portfolio companies by agent (VC)
         EPIs = []
         Portfolio_sd = 0
         if self.Portfolio_size != 0:
@@ -333,16 +319,16 @@ class VC(Agent):
             Portfolio_sd = np.std(EPIs)
         
         ## VC attributes
-        # Attribute 7 - percentage of total screening capacity left, given a portfolio size
-        Percentage_screening_left = self.Effort_left_for_screening/(Time_for_screening_and_monitroring_3months_per_emp_per_fund*self.Investment_analysts)
-        # Attribute 8 - VC quality
+        # Attribute 8 - percentage of total screening capacity left, given a portfolio size
+        Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
+        # Attribute 9 - VC quality
         VC_quality = self.VC_quality
-        # Attribute 9 - Endowment left (1 at the beginning)
+        # Attribute 10 - Endowment left (1 at the beginning)
         Endowement = self.Endowement
-        # Attribute 10 - Remaining of investment stage as a percentage
+        # Attribute 11 - Remaining of investment stage as a percentage
         Remaining_of_investment_stage = Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
         
-        next_state_ = torch.tensor([Prospect_growth, Sub_Industry, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+        next_state_ = torch.tensor([Prospect_growth, Sub_Industry, Growth_sd, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
         return next_state_
     
     # Executes the changes that occur at each time step
@@ -377,10 +363,9 @@ class VC(Agent):
         self.Fund_age += 1 # update the age of the fund after each time step
         self.Portfolio_size = len(self.Portfolio)
 
-        ############################ CHECK THIS ####################################
         self.Effort_allocated_to_startups_in_portfolio = self.Portfolio_size*Advising_time
-        self.Effort_left_for_screening = self.Effort_left_for_fund - self.Effort_allocated_to_startups_in_portfolio
-        self.Number_of_available_screenings = self.Effort_left_for_screening/Screening_time 
+        self.Effort_left_for_DD = self.Effort_available - self.Effort_allocated_to_startups_in_portfolio
+        self.Number_of_available_screenings = self.Effort_left_for_DD/DD_time 
 
         self.Remaining_of_investment_stage = max(0, (Fund_maturity - Startup_exit - self.Fund_age)) # update the number of time steps left for the end of investment stage
         agent.save_model_parameters()
@@ -429,8 +414,7 @@ class Startup(Agent):
             # Repeat noise if the revenue growth goes outside the limits - too extreme
             while self.Growth_with_noise > 1 or self.Growth_with_noise < -1:
                 self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
-
-        ################################ CHECK NOISE REDUCTION WITH TIME - ALSO CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION ###############################     
+   
         # If the startup is not new, the nosie is reduced in proportion to the maturity of the startup
         else:
             self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
@@ -447,9 +431,7 @@ class Startup(Agent):
             self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)) # (1 - VC_quality) done so that a greater VC quality reduces the noise more
             while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
                 self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
-        else:
-
-            ################################ CHECK NOISE REDUCTION WITH TIME - ALSO CHECK IF LIFE STAGE IS YEARS OR QUARTERS, AS THIS WOULD HAVE AN INFLUENCE ON THE EQUATION BELOW FOR NOISE REDUCTION ###############################  
+        else: 
             self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
             while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
                 self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
@@ -507,8 +489,8 @@ class World(Model):
         
         # Creating Agents - VC
         for i in range (Number_of_VCs):
-            # for VC quality, draw a TVPI based on the TVPI distribution for VC quality, and normalise by taking the cdf - normalisaiton between 0 and 1 is needed for noise after DD
-            a = VC(i,float(lognorm.cdf(lognorm.rvs(VC_quality_shape, VC_quality_loc, VC_quality_scale), VC_quality_shape, VC_quality_loc, VC_quality_scale)),int(lognorm.rvs(Number_of_employees_sd, Number_of_employees_loc, Number_of_employees_scale)),0,self)
+            # for VC quality, draw a TVPI based on the TVPI distribution for VC quality, and normalise by taking the cdf - normalisation between 0 and 1 is needed for noise after DD
+            a = VC(i,float(lognorm.cdf(lognorm.rvs(VC_quality_shape, VC_quality_loc, VC_quality_scale), VC_quality_shape, VC_quality_loc, VC_quality_scale)),int(random.choices(Number_of_analysts_list, Number_of_analysts_probabilities)),0,self)
             self.schedule_2.add(a)
             self.VCs.append(a)
         
@@ -535,8 +517,6 @@ class World(Model):
         index = 0
         for i in world.Prospects:
             for j in world.VCs:
-
-                ####################### CHECK THE CALCULATIONS FOR NUMBER OF AVAILABLE SCREENINGS ######################
                 if getattr(j, "Number_of_available_screenings") > 1+ len(getattr(j, "Screening_prospects")):
                     j.Screening_prospects.append([i])
 
