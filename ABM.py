@@ -29,10 +29,19 @@ np.random.seed(0) # enables consisent outputs from random number generation
 # VC Coefficients - general
 Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
 Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
+Startup_exit = 20 # number of time steps it takes a startup to exit (5 years)
 Average_portfolio_size = 32 #Based on real world data
+min_endowment_per_investment = 0.005 # Avoids the algorithm from making investments too small - limits max number of investments to 200 per fund.
+
+# VC Coefficients - VC quality and advisory
 VC_quality_shape = 0.385 # shape coefficient for lognormal distribution
 VC_quality_loc = -0.485 # location coefficient for lognormal distribution
 VC_quality_scale = 1.701 # scale coefficient for lognormal distribution
+VC_quality_max = 5.11 # 99.9% of the values for VC quality will be lower than 5.11, so it is used to normalise VC quality between 0 and 1.
+normalised_mean_VC_quality = lognorm.stats(VC_quality_shape, VC_quality_loc, VC_quality_scale, moments='m')/VC_quality_max # used for the advisory factor in time progession
+additional_return_with_advisory = 0.1 # mean additional return that a startup generates with good advisory from the VC
+additional_return_with_advisory_per_time_step = additional_return_with_advisory/Startup_exit # reduced to per time step
+advisory_delta = normalised_mean_VC_quality - 0.244 # 24.4% is the mean revenue growth rate (14.4%) plus 10% mean increase in growth due to good advisory.
 
 
 # VC attributes - Employees
@@ -54,9 +63,7 @@ Advising_time = 45 # Time in hours needed per time step (i.e. 3 months) to advis
 # VC Coefficients - Returns
 VC_returns_alpha = 2.06 # alpha coefficient for power law distribution of VC retruns
 VC_returns_x_min = 0 # X_min coefficeint for power law distribution of early stage returns
-Startup_exit = 20 # number of time steps it takes a startup to exit (5 years)
 
-#################### CHECK NUMBER OF NEW STARTUPS #########################
 ##Startup Coefficients
 #Startup Coefficients - General
 VCs_to_new_startups_ratio = 260 #The ratio of number of VCs to new startups every quarter worldwide
@@ -68,13 +75,13 @@ Growth_scale = 0.54 # scale parameter for the average skewed normal distribution
 Sub_Industry_loc = {"Sub_Industry_1": 0.475, "Sub_Industry_2": 0.530, "Sub_Industry_3": 0.553, "Sub_Industry_4": 0.576, "Sub_Industry_5": 0.632}
 Sub_Industry_scale = {"Sub_Industry_1": 0.466, "Sub_Industry_2": 0.520, "Sub_Industry_3": 0.543, "Sub_Industry_4": 0.565, "Sub_Industry_5": 0.621}
 
-############### CHANGE THIS ###################
 # Startup Coefficients - Time progression equation
-# Gorwth = Alpha*Growth + Beta*VC + Idiosyncratic_shock
-Alpha = 0.99 #alpha coefficient for time progression equation. Expresses weight of EPI
-Beta = 0.01 #beta coefficient for time progression equation. Expresses the weight of VC 
-Idiosyncratic_shock_mean = 0 #mean for normal distribution for idiosyncratic shock
-Idiosyncratic_shock_sd = 0.0775 #standard deviation for normal distribtion for idiosyncratic shock
+# Gorwth = Alpha*Growth + Beta*Advisory + Idiosyncratic risk
+Alpha = 0.95 # alpha coefficient for time progression equation. Expresses weight of revenue growth
+Beta = 0.05 # beta coefficient for time progression equation. Expresses the weight of VC quality (advisory)
+
+Idiosyncratic_risk_mean = 0 # mean for normal distribution for idiosyncratic risk
+Idiosyncratic_risk_sd = 0.212 # standard deviation for normal distribution for idiosyncratic risk
 
 # Startup Coefficeints - Sub_Industries - same probability for each - random choice
 List_of_Sub_Industries = ["Sub_Industry_1", "Sub_Industry_2", "Sub_Industry_3", "Sub_Industry_4", "Sub_Industry_5"]
@@ -86,7 +93,7 @@ Noise_mean_before_DD = 0 # mean for normal distribution of noise before due dili
 Noise_sd_before_DD = {"Sub_Industry_1": 0.307, "Sub_Industry_2": 0.342, "Sub_Industry_3": 0.357, "Sub_Industry_4": 0.372, "Sub_Industry_5": 0.407} 
 
 # Startup Coefficients - Investors
-Number_of_due_diligence_investors = 10 # number of investors enagaged in due diligence per startup
+Number_of_DD_investors = 5 # number of investors enagaged in due diligence per startup
 
 
 ## A sample of VC returns, used for mapping of revenue growth at exit -> to VC return
@@ -101,7 +108,8 @@ for i in simulated_data: # The power law starts with 1, so we have to shift ever
 sampled_VC_return_data = sorted(simulated_data_new)
 
 ## General model coefficents
-Risk_free_rate = 1.103 # Average of 10-Year US Treasury bill and 10-Year German government bond from 2008 to 2024, compounded 5 years
+Risk_free_rate = 0.0198 # Average of 10-Year US Treasury bill and 10-Year German government bond from 2008 to 2024
+Compounded_risk_free_rate = (1+Risk_free_rate)**(Startup_exit/4) # Compounded 5 years and as a multiple
 
 ## Here we define class for VC, Startup and Activation
 # VC is assigend a unique id, VC quality and the number of investment analysts
@@ -134,13 +142,6 @@ class VC(Agent):
         Growth_cdf = skewnorm.cdf(growth, Growth_a, Growth_loc, Growth_scale)
         # return distribution of returns mapped from the final revenue growth data
         return float(sampled_VC_return_data[int(sample_size*Growth_cdf)])
-    
-
-    ######################### CHECK THIS AND WHAT TO INCLUDE #####################
-    # Projects growth for startups into the future
-    def projected_time_progression(self, growth):
-        updated_growth = Alpha*growth + Beta*self.VC_quality + np.random.normal(Idiosyncratic_shock_mean, Idiosyncratic_shock_sd)
-        return updated_growth
 
 
     # Calculates the expected return without time projection - based only on the current perceived return
@@ -174,7 +175,7 @@ class VC(Agent):
         for i in Portfolio:
             Projected_Growth = getattr(i[0], "Growth_after_DD")
             # calculate expected deviation from target return for each startup
-            Dev = float(self.Growth_to_returns(Projected_Growth) - Risk_free_rate)
+            Dev = float(self.Growth_to_returns(Projected_Growth) - Compounded_risk_free_rate)
             Dev_squared = Dev**2
             # if the deviation is negative, sum the squared deviation
             if Dev < 0:
@@ -191,18 +192,8 @@ class VC(Agent):
         if len(Portfolio) == 0:
             return 0
         else:
-            return float(self.expected_return(Portfolio) - Risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
+            return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
     
-
-    # Returns 1 if a startup is in the portfolio, and 0 otherwise
-    def startup_in_portfolio(self, Prospect):
-        for i in self.Portfolio:
-            if Prospect[0] in i:
-                return 1
-            else:
-                return 0
-        
-    ################################ CHECK REWARDS ###############################
     # Gets reward after taking action a 
     def get_reward(self, action, startup):
         # Only can invest if within investment period
@@ -210,14 +201,14 @@ class VC(Agent):
             # Endowment cannot be negative 
             if action < 0:
                 return torch.tensor([-100*(-action[0])])
-            # If less than 0.005 was invested, we assume that VC does not invest into a given startup
-            if 0<action <0.005:
+            # If less than the minimum endowment was invested, we assume that VC does not invest into a given startup
+            if 0 < action < min_endowment_per_investment:
                 return torch.tensor([0])
-            # If action is more than 0.005 but less than 1, then VC invests in startup
-            if 0.005<=action<=1 and action <= self.Endowement:
+            # If action is more than the minimum endowment but less than 1, then VC invests in startup
+            if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
                 return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
             # If there is not enough endowment, no investment occurs
-            if 0.005<=action<=1 and action > self.Endowement:
+            if min_endowment_per_investment <= action <= 1 and action > self.Endowement:
                 return torch.tensor([-100*(action[0]-self.Endowement)])
             # Action cannot be more than 1
             if action>1:
@@ -281,7 +272,6 @@ class VC(Agent):
     # Gets next state 
     def get_next_state(self, action, Prospect):
         ## Prospect attributes - no prospects on next state, so prospect attributes are null
-        # Startup_in_portfolio = 0
         # Attribute 1 - prospect growth as perceived by agent (VC)
         Prospect_growth = 0
         # Attribute 2 - prospect subindustry
@@ -340,7 +330,7 @@ class VC(Agent):
                     obs = self.get_state(i) # observe next state
                     act = agent.select_action(obs) # select next action based on the observation of the next state
                     reward = self.get_reward(act, i) # a reward is given based on the action selected
-                    if 0.005<=act<=1 and float(act) <= self.Endowement:
+                    if min_endowment_per_investment <= act <=1 and float(act) <= self.Endowement:
                         
                         ############################## WHY VC_INVESTMENTS? - SEEMS LIKE IT COULD BE THE VC INVESTMENTS IN A PARTICULAR STARTUP ################################
                         i[0].VC_investments.append(self)
@@ -395,10 +385,24 @@ class Startup(Agent):
         # if no VC has invested in a particular startup, then return zero
         if len(self.VC_investments) == 0:
             return 0
+        
+    def average_potential_investor_quality(self):
+        total = 0
+        if len(self.VC_potential_investments) != 0:
+            for i in self.VC_potential_investments:
+                total = getattr(i, "VC_quality") + total
+            return total/len(self.VC_potential_investments)
+        # if no potential investors, then return zero
+        if len(self.VC_investments) == 0:
+            return 0
     
     # Startup progress in time                           
     def time_progression(self):
-        self.Growth = Alpha*self.Growth + Beta*self.average_investor_quality() + np.random.normal(Idiosyncratic_shock_mean, Idiosyncratic_shock_sd)
+        # if no VC has ivnested in the startup yet, then progress without considering advisory form VC
+        if len(self.VC_investments) == 0:
+            self.Growth = self.Growth + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
+        else:
+            self.Growth = Alpha*self.Growth + Beta*(self.average_investor_quality()-advisory_delta) - additional_return_with_advisory_per_time_step + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
         self.Life_stage += 1    
         # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% (too extreme - 256 multiple)
         if self.Growth < -1:
@@ -406,53 +410,64 @@ class Startup(Agent):
         if self.Growth > 1:
             self.Growth = 0.99
 
-
     def noise_before_DD(self):
         # If the startup is new, the full noise is applied
         if self.Life_stage == 0:
-            self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
+            self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry])
             # Repeat noise if the revenue growth goes outside the limits - too extreme
             while self.Growth_with_noise > 1 or self.Growth_with_noise < -1:
-                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry])
+                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry])
    
         # If the startup is not new, the nosie is reduced in proportion to the maturity of the startup
         else:
-            self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
+            self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
             # Repeat noise if the revenue growth goes outside the limits - too extreme
             while self.Growth_with_noise > 1 or self.Growth_with_noise < -1:
-                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
-
+                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
 
     def noise_after_DD(self):
-        # VC_quality cannot be implemented here as there may be no potential or actual investors yet, so growth_with_noise used as an approxmation to the quality of/
-        # the VC that performs DD on the startup, as the matching is done between growth_with_noise and VC_quality, so it makes sense
-        noise_reduction_VC_quality = skewnorm.cdf(self.Growth_with_noise, Growth_a, Growth_loc, Growth_scale)
+        ## The following lines calculate and normalise VC quality, as it is used to reduce the noise for growth after DD
+        # if no VC investors or potential investors yet, growth_with_noise is used as an approximation to VC Quality as the matching is done between these two - /
+        # the cdf of the growth with noise is computed, then applied to the VC_quality distribution, and normalised.
+        if len(self.VC_investments) == 0 and len(self.VC_potential_investments) == 0:
+            VC_quality_cdf = skewnorm.cdf(self.Growth_with_noise, Growth_a, Growth_loc, Growth_scale)
+            noise_reduction_VC_quality = lognorm.ppf(VC_quality_cdf, VC_quality_shape, VC_quality_loc, VC_quality_scale)/VC_quality_max
+            # Ensure that the normalised VC quality for noise reduction is between 0 and 1
+            if noise_reduction_VC_quality < 0:
+                noise_reduction_VC_quality = 0.01
+            if noise_reduction_VC_quality > 1:
+                noise_reduction_VC_quality = 0.99
+        # if there are potential VC investors but no actual VC investors, the average VC quality of the potential investors is used
+        elif len(self.VC_investments) == 0:
+            noise_reduction_VC_quality = self.average_potential_investor_quality()
+        # if there are no potential VC investors put there are actual VC investors, the average VC quality of the actual investors is used
+        elif len(self.VC_potential_investments) == 0:
+            noise_reduction_VC_quality = self.average_investor_quality()
+        # if there are both VC investors and potential investors, the average of the two means is taken
+        else:
+            noise_reduction_VC_quality = (self.average_investor_quality + self.average_potential_investor_quality)/2
+
+        # 1 minus the VC quality for noise reduction is applied as a product of the standard deviation of the random noise, so the noise reduction is greater with a greater VC quality
         if self.Life_stage == 0:
-            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)) # (1 - VC_quality) done so that a greater VC quality reduces the noise more
+            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
             while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
+                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
         else: 
-            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
+            self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
             while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
+                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
     
     # Executes the changes that occur at each time step
     def step(self):
-        #self.VC_potential_investments.sort(key = lambda x: x.VC_quality, reverse=True)
-        #for i in self.VC_potential_investments[:5]:
-            #self.VC_investments.append(i)
-        #self.VC_potential_investments = []
         #Updating EPI with noise for startups
         self.noise_before_DD()
         self.noise_after_DD()
         #Collecting the prospects for this time step, 
 
         ############################ WHY THIS? #############################
-        #0.450 and 0.570 correspond to levels of EPI that give return greater than 2
+        #0.450 corresponds to level of EPI that gives return greater than 2
         if self.Life_stage == 0 and self.Growth_with_noise > 0.450:
-            world.Early_stage_prospects.append(self)
-        if self.Life_stage == 8 and self.Growth_with_noise > 0.570:
-            world.Late_stage_prospects.append(self) 
+            world.Prospects.append(self)
 
         # We also make all the startups progress in time    
         self.time_progression()  
@@ -483,19 +498,22 @@ class World(Model):
         # Schedules for the steps through the simulation
         self.schedule_1 = Activation_1(self) 
         self.schedule_2 = Activation_2(self)
-        self.Early_stage_prospects = []
-        self.Late_stage_prospects = []
+        self.Prospects = []
         self.VCs = []
         
         # Creating Agents - VC
         for i in range (Number_of_VCs):
-            # for VC quality, draw a TVPI based on the TVPI distribution for VC quality, and normalise by taking the cdf - normalisation between 0 and 1 is needed for noise after DD
-            a = VC(i,float(lognorm.cdf(lognorm.rvs(VC_quality_shape, VC_quality_loc, VC_quality_scale), VC_quality_shape, VC_quality_loc, VC_quality_scale)),int(random.choices(Number_of_analysts_list, Number_of_analysts_probabilities)),0,self)
+            # for VC quality, draw a TVPI based on the TVPI distribution for VC quality and normalise
+            Normalised_TVPI = lognorm.rvs(VC_quality_shape, VC_quality_loc, VC_quality_scale)/VC_quality_max
+            # Ensure that the normalised VC quality for noise reduction is between 0 and 1:
+            if Normalised_TVPI < 0:
+                Normalised_TVPI = 0.01
+            if Normalised_TVPI > 1:
+                Normalised_TVPI = 0.99
+            # Normalised_TVPI is passed as VC quality
+            a = VC(i,float(Normalised_TVPI),int(random.choices(Number_of_analysts_list, Number_of_analysts_probabilities)),0,self)
             self.schedule_2.add(a)
-            self.VCs.append(a)
-        
-        # Sort VCs in descending order of VC quality
-        self.VCs.sort(key = attrgetter('VC_quality'), reverse = True)                
+            self.VCs.append(a)            
         
         # Collecting data
         self.datacollector = DataCollector(
@@ -511,29 +529,30 @@ class World(Model):
             b = Startup(j, skewnorm.rvs(Growth_a, Sub_Industry_loc[Sub_Industry], Sub_Industry_scale[Sub_Industry]), Sub_Industry, 0, self)
             # add the startup to the schedule
             self.schedule_1.add(b)         
-       
+
             
     def matching_prospects_to_VCs(self):
         index = 0
         for i in world.Prospects:
             for j in world.VCs:
-                if getattr(j, "Number_of_available_screenings") > 1+ len(getattr(j, "Screening_prospects")):
+                if getattr(j, "Number_of_available_screenings") >= 1+ len(getattr(j, "Screening_prospects")):
                     j.Screening_prospects.append([i])
 
                     ############################# BETTER SEE HOW VC_POTENTIAL_INVESTMENTS WORKS #################
                     i.VC_potential_investments.append([j])
 
-                    index +=1
-                if index == Number_of_due_diligence_investors:
+                    index += 1
+                # Ensures each prospect only gets the number of DD investors.
+                if index == Number_of_DD_investors:
                     break
             index = 0
 
         
     def step(self):
+        # resets prospects list back to empty
         self.Prospects = []
         self.generate_startups()
         self.schedule_1.step()
-        self.Prospects.sort(key = attrgetter('Growth_with_noise'), reverse = True)
         self.matching_prospects_to_VCs()
         self.schedule_2.step()
         self.schedule_1.steps += 1
