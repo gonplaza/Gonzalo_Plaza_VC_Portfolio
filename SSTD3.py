@@ -51,30 +51,31 @@ class ReplayBuffer(object):
 		)
 
 
-################## CHECK IF PARAMETERS ARE APPROPRIATE ####################
 class OUNoise:
-    def __init__(self, size, mu=0, theta=0.15, sigma=0.2, x0=None):
-	# parameters for the Ornstein-Uhlenbeck noise
+    def __init__(self, size, mu=0, theta=0.15, sigma=0.2, dt=0.002, x0=None):
+        # parameters for the Ornstein-Uhlenbeck noise
         self.mu = mu * np.ones(size)
         self.theta = theta
         self.sigma = sigma
+        self.dt = dt  # Time increment
         self.x0 = x0
         self.state = np.copy(self.mu)
-        self.reset()  # resets parameters when initialised, to ensure consistent initial state every time the noise function is used
+        self.reset()  # resets parameters when initialised
 
     def reset(self):
-        # Resets to x0 if provided, and to an array of zeroes (shaped like mu) if not
-        self.state = self.x0 if self.x0 is not None else np.zeros_like(self.mu)
+        # Resets to x0 if provided, else to mu
+        self.state = self.x0 if self.x0 is not None else np.copy(self.mu)
 
     def noise(self):
+        # Generates OU noise 
         x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x))
+        dx = self.theta * (self.mu - x) * self.dt + self.sigma * np.sqrt(self.dt) * np.random.randn(len(x))
         self.state = x + dx
         return self.state
 
     def __repr__(self):
-        # Provides a textual representation of the OU noise parameters
-        return f'OrnsteinUhlenbeckActionNoise(mu={self.mu}, sigma={self.sigma}, theta={self.theta})'
+        # Textual representation including dt
+        return f'OrnsteinUhlenbeckActionNoise(mu={self.mu}, sigma={self.sigma}, theta={self.theta}, dt={self.dt})'
 
 
 
@@ -209,9 +210,8 @@ class Critic(nn.Module):
 
 
 class Agent(object):
-	# (env_with_dw, gamma, policy_delay_freq??)
-	def __init__(self, state_dim, action_dim, tau=0.005, gamma=0.99, net_width=128, actor_lr=1e-4, critic_lr=1e-4, \
-			  batch_size = 256, policy_delay_freq = 1, max_size=1000000):
+	def __init__(self, state_dim, action_dim, tau=0.001, gamma=0.99, net_width=256, actor_lr=1e-4, critic_lr=1e-3, \
+			  batch_size = 64, policy_delay_freq = 2, max_size=100000):
 		self.action_dim = action_dim
 		self.state_dim = state_dim
 		self.max_size = max_size
@@ -235,10 +235,9 @@ class Agent(object):
 		self.critic_target = Critic(state_dim, action_dim, net_width, name="Critic_Target").to(self.device) # Initialise target critic network
 
 		self.softmax_operator = Softmax()
-
-		####################### CHECK IF THE PARAMETERS OF THIS NOISE ARE APPROPRIATE #####################
+		
 		self.noise = OUNoise(size=action_dim, mu=0, theta=0.15, sigma=0.2) # initialise noise class
-				  
+		
 		self.memory = ReplayBuffer(self.state_dim, self.action_dim, self.max_size) # initialise replay buffer class
 
 	def select_action(self, state, noise=True):# only used when interact with the env
@@ -252,9 +251,8 @@ class Agent(object):
 		self.actor.train() # switch back to training mode
 
 		# add the Ornstein-Uhlenbeck noise for action exploration
-		if noise:
-				ou_noise = self.noise.noise()
-				a += ou_noise
+		ou_noise = self.noise.noise()
+		a += ou_noise
 		
 		return a.cpu().detach().numpy().flatten() # converts the action tensor to numpy array, moves it to the CPU (ensures compatibility), converts it to 1D, and detaches to ensure no gradient computation
 	
@@ -270,14 +268,13 @@ class Agent(object):
 		with torch.no_grad():
 			state, action, reward, next_state, end = self.memory.sample(self.batch_size) # sample batch of experiences
 			target_action = self.actor_target.forward(next_state)
-			
-			####################### CHECK IF THE PARAMETERS OF THIS NOISE ARE APPROPRIATE #####################
-			noise = torch.randn_like(target_action) * 0.2 # 0.2 to scale de noise
-			noise = noise.clamp(-0.5, 0.5) # clamp noise to prevent excessively large perturbations
-			
-			smoothed_target_action = target_action + noise # apply random noise to smooth the target action
+			"""Target smoothing noise is chosen not to be added here as it adds too much variaiblity - there is already exploration noise"""
+			# noise = torch.randn_like(target_action) * 0.0025 # Scale the standard deviation of the noise to 0.02
+			# noise = noise.clamp(-0.005, 0.005) # clamp noise to prevent excessively large perturbations
+			# smoothed_target_action = target_action + noise # apply random noise to smooth the target action
 
-		target_Q1, target_Q2 = self.critic_target.forward(next_state, smoothed_target_action) # target Q-values
+		# target_Q1, target_Q2 = self.critic_target.forward(next_state, smoothed_target_action) # target Q-values
+		target_Q1, target_Q2 = self.critic_target.forward(next_state, target_action) # target Q-values
 		target_Q = self.softmax_operator.swap(target_Q1, target_Q2) # apply the softmax operator
 		y = reward + (self.gamma*target_Q*(1 - end)).detach() # TD target, no update if end=1
 
@@ -351,4 +348,5 @@ class Agent(object):
         # pause and wait for user input to continue program - allows for manual inspection of printed parameters	
 		input()
 
+		
     
