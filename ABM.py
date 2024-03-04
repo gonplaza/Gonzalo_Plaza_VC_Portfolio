@@ -19,8 +19,8 @@ from operator import attrgetter
 from SSTD3 import Agent, ReplayBuffer, OUNoise, Critic, Actor, Softmax
 import torch
 
-####################### CHECK STATE DIM ####################################
-agent = Agent(state_dim = 12, action_dim = 1, batch_size = 64) # Initialise the agent
+
+agent = Agent(state_dim = 11, action_dim = 1, batch_size = 64) # Initialise the agent
 
 np.random.seed(0) # enables consisent outputs from random number generation
 """ agent.load_model_parameters() """ # load the trained model parameters for all the networks
@@ -29,7 +29,7 @@ np.random.seed(0) # enables consisent outputs from random number generation
 # VC Coefficients - general
 Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
 Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
-Startup_exit = 20 # number of time steps it takes a startup to exit (5 years)
+Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
 Average_portfolio_size = 32 #Based on real world data
 min_endowment_per_investment = 0.005 # Avoids the algorithm from making investments too small - limits max number of investments to 200 per fund.
 
@@ -41,7 +41,7 @@ VC_quality_max = 5.11 # 99.9% of the values for VC quality will be lower than 5.
 normalised_mean_VC_quality = lognorm.stats(VC_quality_shape, VC_quality_loc, VC_quality_scale, moments='m')/VC_quality_max # used for the advisory factor in time progession
 additional_return_with_advisory = 0.1 # mean additional return that a startup generates with good advisory from the VC
 additional_return_with_advisory_per_time_step = additional_return_with_advisory/Startup_exit # reduced to per time step
-advisory_delta = normalised_mean_VC_quality - 0.244 # 24.4% is the mean revenue growth rate (14.4%) plus 10% mean increase in growth due to good advisory.
+advisory_VC_quality_delta = normalised_mean_VC_quality - 0.244 # this is done so that the advisory factor has the same mean as the the mean revenue growth rate (14.4%) plus 10% (mean increase in growth due to good advisory) = 24.4%
 
 
 # VC attributes - Employees
@@ -77,8 +77,8 @@ Sub_Industry_scale = {"Sub_Industry_1": 0.466, "Sub_Industry_2": 0.520, "Sub_Ind
 
 # Startup Coefficients - Time progression equation
 # Gorwth = Alpha*Growth + Beta*Advisory + Idiosyncratic risk
-Alpha = 0.95 # alpha coefficient for time progression equation. Expresses weight of revenue growth
-Beta = 0.05 # beta coefficient for time progression equation. Expresses the weight of VC quality (advisory)
+Beta = 1/Startup_exit # beta coefficient for time progression equation. Expresses the weight of VC quality (advisory)
+Alpha = 1- Beta # alpha coefficient for time progression equation. Expresses weight of revenue growth
 
 Idiosyncratic_risk_mean = 0 # mean for normal distribution for idiosyncratic risk
 Idiosyncratic_risk_sd = 0.212 # standard deviation for normal distribution for idiosyncratic risk
@@ -109,7 +109,7 @@ sampled_VC_return_data = sorted(simulated_data_new)
 
 ## General model coefficents
 Risk_free_rate = 0.0198 # Average of 10-Year US Treasury bill and 10-Year German government bond from 2008 to 2024
-Compounded_risk_free_rate = (1+Risk_free_rate)**(Startup_exit/4) # Compounded 5 years and as a multiple
+Compounded_risk_free_rate = (1+Risk_free_rate)**(Startup_exit/4) # Compounded 8 years and as a multiple
 
 ## Here we define class for VC, Startup and Activation
 # VC is assigend a unique id, VC quality and the number of investment analysts
@@ -133,7 +133,7 @@ class VC(Agent):
         self.Effort_left_for_DD = self.Effort_available - self.Effort_allocated_to_startups_in_portfolio # Effort left for DD after taking away the effort allocated to advisory
         self.Number_of_available_screenings = self.Effort_left_for_DD/DD_time # Number of possible screenings per time step based on the effort left for DD
         
-        self.Remaining_of_investment_stage = max(0, (Fund_maturity - Startup_exit - self.Fund_age)) # Investment stage is 3 years, so (8 years - 5 years - fund age)
+        self.Remaining_of_investment_stage = max(0, (Fund_maturity - Startup_exit - self.Fund_age)) # Investment stage is 2 years, so (10 years - 8 years - fund age)
     
         
     # This function enables us to map final revenue growth (startup potential) into returns
@@ -155,8 +155,8 @@ class VC(Agent):
             for i in Portfolio:
                 Projected_Growth = getattr(i[0], "Growth_after_DD")
 
-                ################## CHECK THIS FORMULA  - WHY i[2]? ######################
-                Return = float((self.Growth_to_returns(Projected_Growth)*i[2]))+ Return
+                # i[1] would correspond to the action on the startup, that is the amount invested (so it is used as weight for portfolio return)
+                Return = float((self.Growth_to_returns(Projected_Growth)*i[1]))+ Return
             return Return
 
 
@@ -165,8 +165,8 @@ class VC(Agent):
     def final_return(self, Portfolio):
         Return = 0
         for i in Portfolio:
-            ############### CHECK i[2] HERE TOO - HERE IT SEEMS LIKE IT IS THE WEIGHT ##################
-            Return = float((self.Growth_to_returns(getattr(i[0], "Growth"))*i[2]))+ Return
+            # i[1] used as a weight here too
+            Return = float((self.Growth_to_returns(getattr(i[0], "Growth"))*i[1]))+ Return
         return Return + self.Endowement
 
 
@@ -204,7 +204,7 @@ class VC(Agent):
             # If less than the minimum endowment was invested, we assume that VC does not invest into a given startup
             if 0 < action < min_endowment_per_investment:
                 return torch.tensor([0])
-            # If action is more than the minimum endowment but less than 1, then VC invests in startup
+            # If action is more than the minimum endowment but less than 1, then VC invests in startup, and the reward is the Sortino ratio after minus Sortino ratio before
             if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
                 return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
             # If there is not enough endowment, no investment occurs
@@ -279,7 +279,6 @@ class VC(Agent):
         # Attribute 3 - growth standard deviation
         Growth_sd = 0
         
-        ################ SEE THIS AS THIS SEEMS TO BE FOR COHORT OF POSSIBLE SCREENINGS, NOT ACTUAL SCREENINGS ###################
         ## Cohort attributes
         # Attribute 4 - average growth of prospects, as perceived by agent (VC)
         total_cohort = 0
@@ -331,21 +330,12 @@ class VC(Agent):
                     act = agent.select_action(obs) # select next action based on the observation of the next state
                     reward = self.get_reward(act, i) # a reward is given based on the action selected
                     if min_endowment_per_investment <= act <=1 and float(act) <= self.Endowement:
-                        
-                        ############################## WHY VC_INVESTMENTS? - SEEMS LIKE IT COULD BE THE VC INVESTMENTS IN A PARTICULAR STARTUP ################################
-                        i[0].VC_investments.append(self)
+                        i[0].VC_investments.append(self) # Assign investor to startup
                         self.Portfolio.append(i+[float(act)]+[float(getattr(i[0],"Growth_after_DD"))]+[float(self.Fund_age)]) # add the startup to the portfolio
                         self.Endowement = self.Endowement - float(act) # subtract action (investment) from endowment
                     new_state = self.get_next_state(act, obs) # get the next state based on the action and the observation
                     agent.remember(obs, act, reward, new_state, int(end)) # store the memory (s,a,r,s') in the replay buffer
                     agent.learn() # update network parameters
-                    #agent.load_models()
-                    #print(agent.memory.state_memory)
-                    #print(agent.memory.action_memory)
-                    #print("This is a sample")
-                    #print(agent.memory.sample_buffer(1))
-                    #print("This is a group of parameters")
-                    #print(dict(agent.actor.named_parameters()))
                     print("This is the endowmwnet left")
                     print(self.Endowement) # print the endowment left after each action
                     print("This is the current portfolio size")
@@ -402,7 +392,8 @@ class Startup(Agent):
         if len(self.VC_investments) == 0:
             self.Growth = self.Growth + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
         else:
-            self.Growth = Alpha*self.Growth + Beta*(self.average_investor_quality()-advisory_delta) - additional_return_with_advisory_per_time_step + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
+            advisory_factor = self.average_investor_quality()-advisory_VC_quality_delta # VC quality distribution but same mean as the revenue growoth with good advisory
+            self.Growth = Alpha*self.Growth + (Beta*advisory_factor - additional_return_with_advisory_per_time_step) + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
         self.Life_stage += 1    
         # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% (too extreme - 256 multiple)
         if self.Growth < -1:
@@ -463,12 +454,8 @@ class Startup(Agent):
         self.noise_before_DD()
         self.noise_after_DD()
         #Collecting the prospects for this time step, 
-
-        ############################ WHY THIS? #############################
-        #0.450 corresponds to level of EPI that gives return greater than 2
-        if self.Life_stage == 0 and self.Growth_with_noise > 0.450:
+        if self.Life_stage == 0:
             world.Prospects.append(self)
-
         # We also make all the startups progress in time    
         self.time_progression()  
         
@@ -537,10 +524,7 @@ class World(Model):
             for j in world.VCs:
                 if getattr(j, "Number_of_available_screenings") >= 1+ len(getattr(j, "Screening_prospects")):
                     j.Screening_prospects.append([i])
-
-                    ############################# BETTER SEE HOW VC_POTENTIAL_INVESTMENTS WORKS #################
                     i.VC_potential_investments.append([j])
-
                     index += 1
                 # Ensures each prospect only gets the number of DD investors.
                 if index == Number_of_DD_investors:
@@ -557,7 +541,6 @@ class World(Model):
         self.schedule_2.step()
         self.schedule_1.steps += 1
         self.schedule_1.time += 1
-        #self.datacollector.collect(self)
 
 
 # Perform steps - simulation
@@ -579,20 +562,16 @@ print(df)
 Portfolio_data = []    
 for i in world.VCs:
     for j in i.Portfolio:
-        
-        ############## CHECK IF THIS SHOULD BE Growth OR growth - THIS MAKES SENSE WITH LINE df2 BELOW - MEANS THAT FOR i in PORTFOLIO, i[0] IS STAGE, i[1] IS ENDOWMENT, i[2] IS GROWTH AFTER DD, AND i[3] IS FUND AGE #######################
-        Transit = [i.unique_id, j[0].unique_id, j[0].Growth, i.Growth_to_returns(j[0].Growth, j[1])]
-
-        ######################## SEE WHY j[0] IS NOT INCLUDED, AND WHY ONLY SUB-INDUSTRY FROM J[0]??? #######################
-        # Access elements from j[1] onwards - do not include j[0]
+        # Transit used to record all the data in a spreadsheet
+        Transit = [i.unique_id, j[0].unique_id, j[0].Growth, i.Growth_to_returns(j[0].Growth)]
+        # Access elements from j[1] onwards - do not include j[0] as this is the startup itself (j[1] onwards includes amount invested, growth after DD, and fund age)
         for z in j[1:]:
             Transit.append(z)
         Transit.append(j[0].Sub_Industry[0])
 
         Portfolio_data = [Transit] + Portfolio_data   
 
-########################## CHECK THE COLUMNS ARE RIGHT, ESPECIALLY WITH "Stage" ######################
-# Export the portfolio data to an Excel spreadsheet
-df2 = pd.DataFrame(np.array(Portfolio_data), columns = ["Unique_id_VC", "Unique_id_Startup", "Growth_final", "Return", "Stage","Amount_Invested", "Growth_after_DD", "Fund_age", "Sub_Industry"])
+# Export the portfolio data to a spreadsheet
+df2 = pd.DataFrame(np.array(Portfolio_data), columns = ["Unique_id_VC", "Unique_id_Startup", "Growth_final", "Return","Amount_Invested", "Growth_after_DD", "Fund_age", "Sub_Industry"])
 df2.to_excel("Portfolio_data.xlsx")
 print(df2) 
