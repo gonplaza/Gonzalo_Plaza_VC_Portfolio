@@ -19,7 +19,7 @@ from operator import attrgetter
 from SSTD3 import Agent, ReplayBuffer, OUNoise, Critic, Actor, Softmax
 import torch
 
-number_of_simulations = 1
+number_of_simulations = 100
 Portfolio_size_data = []
 Simulation_number = []
 
@@ -32,7 +32,7 @@ for sim in range(number_of_simulations):
 
     ## VC Coefficients
     # VC Coefficients - general
-    Number_of_VCs = 10 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
+    Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
     Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
     Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
     Average_portfolio_size = 32 #Based on real world data
@@ -464,7 +464,7 @@ for sim in range(number_of_simulations):
             self.noise_before_DD()
             self.noise_after_DD()
             #Collecting the prospects for this time step, 
-            if self.Life_stage == 0:
+            if self.Life_stage == 0 and world.counter < (Fund_maturity-Startup_exit):
                 world.Prospects.append(self)
             # We also make all the startups progress in time    
             self.time_progression()  
@@ -521,7 +521,7 @@ for sim in range(number_of_simulations):
 
         # Creating Agents - Startups
         def generate_startups(self):        
-            for j in range (self.schedule_1.steps*Number_of_new_startups, self.schedule_1.steps+1*Number_of_new_startups):
+            for j in range (self.schedule_1.steps*Number_of_new_startups, (self.schedule_1.steps+1)*Number_of_new_startups):
                 # Get a sub-industry by random choice 
                 Sub_Industry = random.choices(List_of_Sub_Industries, Probability_Distribution_of_Sub_Industries)[0]
                 # create the startup, and assign a revenue growth based on the distribution corresponding to the sub-industry
@@ -535,7 +535,11 @@ for sim in range(number_of_simulations):
             # clear list of screening prospects before adding new prospects 
             for k in world.VCs:
                 k.Screening_prospects = []
+            # Shuffle to go through prospects in a random order
+            random.shuffle(world.Prospects)
             for i in world.Prospects:
+                # Shuffle so that each prospect interacts with VCs randomly
+                random.shuffle(world.VCs)
                 for j in world.VCs:
                     if getattr(j, "Number_of_available_screenings") >= 1+ len(getattr(j, "Screening_prospects")):
                         j.Screening_prospects.append(i)
@@ -563,9 +567,8 @@ for sim in range(number_of_simulations):
             self.schedule_1.time += 1
             self.counter += 1
             print("Step",self.counter)
+            print("Startups invested:", len(self.schedule_1.agents))
             print("Prospects:", len(self.Prospects))
-
-
 
 
     # Perform steps - simulation
