@@ -10,7 +10,8 @@ import torch.nn.functional as F
 import numpy as np
 import copy
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 
 class ReplayBuffer(object):
@@ -82,14 +83,20 @@ class OUNoise:
 class Softmax:
 	# function to calculate weights using the softmax operator
 	def softmax(self, x):
-		exp_x = np.exp(x - np.max(x)) # subtracting np.max(x) for numerical stability
-		return exp_x / np.sum(exp_x)
+		#x = x.detach().numpy()
+		#exp_x = np.exp(x)
+		#return exp_x / np.sum(exp_x)
+		# PyTorch's softmax function is used directly
+		return F.softmax(x, dim=-1)
 
     # calculate the weights for the Q-values, and return the final Q-value with the weights swapped
 	def swap(self, q1, q2):
-		s_weights = self.softmax([q1, q2])
-		w1, w2 = s_weights
-		
+		#s_weights = self.softmax([q1, q2])
+		#w1, w2 = s_weights
+		q_values = torch.stack([q1, q2], dim=0)
+		s_weights = self.softmax(q_values)
+		# Extract softmax weights for each Q-value.
+		w1, w2 = s_weights.unbind(dim=0)
 		return w1*q2 +w2*q1
 
 
@@ -210,7 +217,7 @@ class Critic(nn.Module):
 
 
 class Agent(object):
-	def __init__(self, state_dim, action_dim, tau=0.001, gamma=0.99, net_width=256, actor_lr=1e-4, critic_lr=1e-3, \
+	def __init__(self, state_dim, action_dim, tau=0.005, gamma=0.99, net_width=256, actor_lr=1e-4, critic_lr=1e-3, \
 			  batch_size = 64, policy_delay_freq = 2, max_size=100000):
 		self.action_dim = action_dim
 		self.state_dim = state_dim
@@ -244,8 +251,8 @@ class Agent(object):
 		self.actor.eval() # switch actor network to evaluation mode (appropriate as not training)
 		
 		with torch.no_grad(): # disable gradient computation as not needed for action selection (not training) - saves computation time	
-			# convert input state into 2D flat tensor to ensure the correct input shape to the neural network:
-			observation = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+			# convert input state into 2D flat tensor to ensure the correct input shape and type to the neural network:
+			observation = state.reshape(1, -1).to(dtype=torch.float32).to(self.device)
 			a = self.actor.forward(observation).to(self.device) # select an action based on the observation
 			
 		self.actor.train() # switch back to training mode
