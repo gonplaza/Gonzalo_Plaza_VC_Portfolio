@@ -136,7 +136,7 @@ class Actor(nn.Module): # inherits neural network module
 		return a
 	
 	def save_checkpoint(self):
-		print('saving checkpoint...')
+		#print('saving checkpoint...')
 		torch.save(self.state_dict(), self.checkpoint_file) # safes the state dictionary containing model parameters in checkpoint file
 	
 	def load_checkpoint(self):
@@ -207,7 +207,7 @@ class Critic(nn.Module):
 		return q1, q2
 	
 	def save_checkpoint(self):
-		print('saving checkpoint...')
+		#print('saving checkpoint...')
 		torch.save(self.state_dict(), self.checkpoint_file)
 	
 	def load_checkpoint(self):
