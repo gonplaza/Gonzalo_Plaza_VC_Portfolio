@@ -19,15 +19,15 @@ from operator import attrgetter
 from SSTD3 import Agent, ReplayBuffer, OUNoise, Critic, Actor, Softmax
 import torch
 
-### TRYING LIGHTER SIMULATION  - CHANGED NET WIDTH (256), MAX SIZE (100000), BATCH SIZE (64), NUMBER OF VCS (100), RATIO OF STARTUOS TO VCs (260) ###
-agent = Agent(state_dim = 10, action_dim = 1, net_width = 16, batch_size = 8, max_size = 100) # Initialise the agent
 
+
+agent = Agent(state_dim = 10, action_dim = 1) # Initialise the agent
 np.random.seed(0) # enables consisent outputs from random number generation
 "agent.load_model_parameters()" # load the trained model parameters for all the networks
 
 ## VC Coefficients
 # VC Coefficients - general
-Number_of_VCs = 10 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
+Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
 Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
 Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
 Average_portfolio_size = 32 #Based on real world data
@@ -66,7 +66,7 @@ VC_returns_x_min = 0 # X_min coefficeint for power law distribution of early sta
 
 ##Startup Coefficients
 #Startup Coefficients - General
-VCs_to_new_startups_ratio = 20 #The ratio of number of VCs to new startups every quarter worldwide
+VCs_to_new_startups_ratio = 260 #The ratio of number of VCs to new startups every quarter worldwide
 Number_of_new_startups = Number_of_VCs*VCs_to_new_startups_ratio #Applies ratio to estimate the appropriate number of new startups per time step for the model
 Growth_a = -2.89 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
 Growth_loc = 0.55 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
@@ -357,10 +357,10 @@ class VC(Agent):
                     new_state = self.get_next_state(act, obs) # get the next state based on the action and the observation
                     agent.remember(obs, act, reward, new_state, int(end)) # store the memory (s,a,r,s') in the replay buffer
                     agent.learn() # update network parameters
-                    print("This is the endowmwnet left")
-                    print(self.Endowement) # print the endowment left after each action
-                    print("This is the current portfolio size")
-                    print(self.Portfolio_size) # print the portfolio size after each action
+                    #print("This is the endowmwnet left")
+                    #print(self.Endowement) # print the endowment left after each action
+                    #print("This is the current portfolio size")
+                    #print(self.Portfolio_size) # print the portfolio size after each action
         self.Fund_age += 1 # update the age of the fund after each time step
         self.Portfolio_size = len(self.Portfolio)
 
@@ -418,24 +418,23 @@ class Startup(Agent):
         self.Life_stage += 1    
         # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% (too extreme - 256 multiple)
         if self.Growth < -1:
-            self.Growth = -0.99
+            self.Growth = -1
         if self.Growth > 1:
-            self.Growth = 0.99
+            self.Growth = 1
 
     def noise_before_DD(self):
         # If the startup is new, the full noise is applied
         if self.Life_stage == 0:
             self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry])
-            # Repeat noise if the revenue growth goes outside the limits - too extreme
-            while self.Growth_with_noise > 1 or self.Growth_with_noise < -1:
-                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry])
-   
-        # If the startup is not new, the nosie is reduced in proportion to the maturity of the startup
+        # If the startup is not new, the noise is reduced in proportion to the maturity of the startup
         else:
             self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
-            # Repeat noise if the revenue growth goes outside the limits - too extreme
-            while self.Growth_with_noise > 1 or self.Growth_with_noise < -1:
-                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
+        # Keep perceived Growth within limits
+        if self.Growth_with_noise < -1:
+            self.Growth_with_noise = -1
+        if self.Growth_with_noise > 1:
+            self.Growth_with_noise = 1
+
 
     def noise_after_DD(self):
         ## The following lines calculate and normalise VC quality, as it is used to reduce the noise for growth after DD
@@ -445,9 +444,9 @@ class Startup(Agent):
             VC_quality_cdf = skewnorm.cdf(self.Growth_with_noise, Growth_a, Growth_loc, Growth_scale)
             noise_reduction_VC_quality = lognorm.ppf(VC_quality_cdf, VC_quality_shape, VC_quality_loc, VC_quality_scale)/VC_quality_max
             # Ensure that the normalised VC quality for noise reduction is between 0 and 1
-            if noise_reduction_VC_quality < 0:
+            if noise_reduction_VC_quality <= 0:
                 noise_reduction_VC_quality = 0.01
-            if noise_reduction_VC_quality > 1:
+            if noise_reduction_VC_quality >= 1:
                 noise_reduction_VC_quality = 0.99
         # if there are potential VC investors but no actual VC investors, the average VC quality of the potential investors is used
         elif len(self.VC_investments) == 0:
@@ -462,12 +461,13 @@ class Startup(Agent):
         # 1 minus the VC quality for noise reduction is applied as a product of the standard deviation of the random noise, so the noise reduction is greater with a greater VC quality
         if self.Life_stage == 0:
             self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
-            while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
         else: 
             self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
-            while self.Growth_after_DD > 1 or self.Growth_after_DD < -1:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
+        # Keep perceived Growth within limits
+        if self.Growth_after_DD < -1:
+            self.Growth_after_DD = -1
+        if self.Growth_after_DD > 1:
+            self.Growth_after_DD = 1
     
     # Executes the changes that occur at each time step
     def step(self):
@@ -511,15 +511,16 @@ class World(Model):
         self.schedule_2 = Activation_2(self)
         self.Prospects = []
         self.VCs = []
+        self.counter = 0
         
         # Creating Agents - VC
         for i in range (Number_of_VCs):
             # for VC quality, draw a TVPI based on the TVPI distribution for VC quality and normalise
             Normalised_TVPI = lognorm.rvs(VC_quality_shape, VC_quality_loc, VC_quality_scale)/VC_quality_max
             # Ensure that the normalised VC quality for noise reduction is between 0 and 1:
-            if Normalised_TVPI < 0:
+            if Normalised_TVPI <= 0:
                 Normalised_TVPI = 0.01
-            if Normalised_TVPI > 1:
+            if Normalised_TVPI >= 1:
                 Normalised_TVPI = 0.99
             # Normalised_TVPI is passed as VC quality
             a = VC(i,float(Normalised_TVPI),random.choices(Number_of_analysts_list, Number_of_analysts_probabilities)[0],0,self)
@@ -565,6 +566,8 @@ class World(Model):
         self.schedule_2.step()
         self.schedule_1.steps += 1
         self.schedule_1.time += 1
+        self.counter += 1
+        print("Step",self.counter)
 
 
 # Perform steps - simulation
