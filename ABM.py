@@ -19,15 +19,15 @@ from operator import attrgetter
 from SSTD3 import Agent, ReplayBuffer, OUNoise, Critic, Actor, Softmax
 import torch
 
-
-agent = Agent(state_dim = 11, action_dim = 1, batch_size = 64) # Initialise the agent
+### TRYING LIGHTER SIMULATION  - CHANGED NET WIDTH (256), MAX SIZE (100000), BATCH SIZE (64), NUMBER OF VCS (100), RATIO OF STARTUOS TO VCs (260) ###
+agent = Agent(state_dim = 10, action_dim = 1, net_width = 16, batch_size = 8, max_size = 100) # Initialise the agent
 
 np.random.seed(0) # enables consisent outputs from random number generation
-""" agent.load_model_parameters() """ # load the trained model parameters for all the networks
+"agent.load_model_parameters()" # load the trained model parameters for all the networks
 
 ## VC Coefficients
 # VC Coefficients - general
-Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
+Number_of_VCs = 10 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
 Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
 Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
 Average_portfolio_size = 32 #Based on real world data
@@ -66,7 +66,7 @@ VC_returns_x_min = 0 # X_min coefficeint for power law distribution of early sta
 
 ##Startup Coefficients
 #Startup Coefficients - General
-VCs_to_new_startups_ratio = 260 #The ratio of number of VCs to new startups every quarter worldwide
+VCs_to_new_startups_ratio = 20 #The ratio of number of VCs to new startups every quarter worldwide
 Number_of_new_startups = Number_of_VCs*VCs_to_new_startups_ratio #Applies ratio to estimate the appropriate number of new startups per time step for the model
 Growth_a = -2.89 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
 Growth_loc = 0.55 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
@@ -166,10 +166,31 @@ class VC(Agent):
         Return = 0
         for i in Portfolio:
             # i[1] used as a weight here too
-            Return = float((self.Growth_to_returns(getattr(i[0], "Growth"))*i[1]))+ Return
-        return Return + self.Endowement
+            Return = float((self.Growth_to_returns(getattr(i[0], "Growth")))*i[1])+ Return
+        return Return + self.Endowement                                                                                     
 
 
+    #Calculate expected variance for the whole portfolio 
+    def expected_portfolio_variance(self, Portfolio):
+        Total_variance = 0
+        for i in Portfolio:
+                for j in Portfolio:
+                    weight_i = i[1]/(1-self.Endowement)
+                    weight_j = j[1]/(1-self.Endowement)
+                    sd_i = Noise_sd_before_DD[getattr(i[0], "Sub_Industry")] 
+                    sd_j = Noise_sd_before_DD[getattr(j[0], "Sub_Industry")]
+                    Total_variance = (weight_i*weight_j*sd_i*sd_j) + Total_variance # Assuming a correlation coefficient equal to 1 (perfectly correlated) as same industry
+        return Total_variance
+    
+        
+    # Expected Sharpe ratio
+    def expected_Sharpe_ratio(self, Portfolio):  
+        if len(Portfolio) == 0:
+            return 0
+        else:
+            return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_variance(Portfolio))
+    
+    """
     def expected_portfolio_downside_deviation(self, Portfolio):
         sigma_d = 0
         for i in Portfolio:
@@ -179,13 +200,11 @@ class VC(Agent):
             Dev_squared = Dev**2
             # if the deviation is negative, sum the squared deviation
             if Dev < 0:
-                sigma_d = sigma_d + Dev_squared       
+                sigma_d = sigma_d + Dev_squared
         # calculate the expected downside deviation from the sum of the downside squared deviations
-        sigma_d = sigma_d/(len(Portfolio) -1)
+        sigma_d = sigma_d/len(Portfolio)
         sigma_d = sigma_d**(1/2)
-
         return sigma_d
-
             
     # Expected Sortino ratio
     def expected_Sortino_ratio(self, Portfolio):  
@@ -193,9 +212,10 @@ class VC(Agent):
             return 0
         else:
             return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
+    """
     
     # Gets reward after taking action a 
-    def get_reward(self, action, startup):
+    def get_reward(self, action, old_portfolio):
         # Only can invest if within investment period
         if self.Fund_age <= (Fund_maturity - Startup_exit):  
             # Endowment cannot be negative 
@@ -206,7 +226,8 @@ class VC(Agent):
                 return torch.tensor([0])
             # If action is more than the minimum endowment but less than 1, then VC invests in startup, and the reward is the Sortino ratio after minus Sortino ratio before
             if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
-                return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
+                #return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
+                return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio))])
             # If there is not enough endowment, no investment occurs
             if min_endowment_per_investment <= action <= 1 and action > self.Endowement:
                 return torch.tensor([-100*(action[0]-self.Endowement)])
@@ -222,33 +243,32 @@ class VC(Agent):
     def get_state(self, Prospect): 
         ## Prospect attributes
         # Attribtue 1 - prospect growth as perceived by agent (VC)
-        Prospect_Growth = getattr(Prospect[0], "Growth_after_DD")
-        # Attribute 2 - prospect sub-industry
-        Sub_Industry = getattr(Prospect[0], "Sub_Industry")[0]
-        # Attribute 3 - growth standard deviation
+        Prospect_Growth = getattr(Prospect, "Growth_after_DD")
+        # Attribute 2 - growth standard deviation based on subindustry
+        Sub_Industry = getattr(Prospect, "Sub_Industry")
         Growth_sd = Noise_sd_before_DD[Sub_Industry]
         
         ## Cohort attributes
-        # Attibute 4 - average growth of prospects, as perceived by agent (VC)
+        # Attibute 3 - average growth of prospects, as perceived by agent (VC)
         total_cohort = 0
         for i in self.Screening_prospects:
-            total_cohort = getattr(i[0], "Growth_after_DD") + total_cohort
+            total_cohort = getattr(i, "Growth_after_DD") + total_cohort
         Screenings_mean = total_cohort/len(self.Screening_prospects) 
-        # Attribute 5 - standard deviation of perceived growth of prospects by agent (VC)
+        # Attribute 4 - standard deviation of perceived growth of prospects by agent (VC)
         Screenings = []
         for i in self.Screening_prospects:
-            Screenings.append(getattr(i[0], "Growth_after_DD"))
+            Screenings.append(getattr(i, "Growth_after_DD"))
         Screenings_sd = np.std(Screenings)
             
         ## Portfolio attributes
-        # Attribute 6 - mean perceived growth in portfolio by agent (VC)
+        # Attribute 5 - mean perceived growth in portfolio by agent (VC)
         total = 0
         for i in self.Portfolio:
             total = getattr(i[0], "Growth_after_DD") + total
         Portfolio_mean = 0
         if self.Portfolio_size != 0:
             Portfolio_mean = total/self.Portfolio_size
-        #Attribute 7 - standard deviation of perceived growth of portfolio companies by agent (VC)
+        #Attribute 6 - standard deviation of perceived growth of portfolio companies by agent (VC)
         growths = []
         Portfolio_sd = 0
         if self.Portfolio_size != 0:
@@ -257,16 +277,16 @@ class VC(Agent):
             Portfolio_sd = np.std(growths)
         
         ## VC attributes
-        # Attribute 8 - percentage of total screening/DD capacity left, given a portfolio size
+        # Attribute 7 - percentage of total screening/DD capacity left, given a portfolio size
         Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
-        # Attribute 9 - VC quality
+        # Attribute 8 - VC quality
         VC_quality = self.VC_quality
-        # Attribute 10 - Endowment left (1 at the beginning)
+        # Attribute 9 - Endowment left (1 at the beginning)
         Endowement = self.Endowement
-        # Attribute 11 - Remaining of investment stage as a percentage
-        Remaining_of_investment_stage = Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
+        # Attribute 10 - Remaining of investment stage as a percentage
+        Remaining_of_investment_stage = self.Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
         
-        state_ = torch.tensor([Prospect_Growth, Sub_Industry, Growth_sd, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+        state_ = torch.tensor([Prospect_Growth, Growth_sd, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
         return state_
     
     # Gets next state 
@@ -274,32 +294,30 @@ class VC(Agent):
         ## Prospect attributes - no prospects on next state, so prospect attributes are null
         # Attribute 1 - prospect growth as perceived by agent (VC)
         Prospect_growth = 0
-        # Attribute 2 - prospect subindustry
-        Sub_Industry = 0
-        # Attribute 3 - growth standard deviation
+        # Attribute 2 - growth standard deviation based on subindustry
         Growth_sd = 0
         
         ## Cohort attributes
-        # Attribute 4 - average growth of prospects, as perceived by agent (VC)
+        # Attribute 3 - average growth of prospects, as perceived by agent (VC)
         total_cohort = 0
         for i in self.Screening_prospects:
-            total_cohort = getattr(i[0], "Growth_after_DD") + total_cohort
+            total_cohort = getattr(i, "Growth_after_DD") + total_cohort
         Screenings_mean = total_cohort/len(self.Screening_prospects) 
-        # Attribute 5 - standard deviation of perceived growth of prospects by agent (VC)
+        # Attribute 4 - standard deviation of perceived growth of prospects by agent (VC)
         Screenings = []
         for i in self.Screening_prospects:
-            Screenings.append(getattr(i[0], "Growth_after_DD"))
+            Screenings.append(getattr(i, "Growth_after_DD"))
         Screenings_sd = np.std(Screenings)
             
         # Portfolio attributes 
-        # Attribute 6 - mean perceived growth in portfolio by agent (VC)
+        # Attribute 5 - mean perceived growth in portfolio by agent (VC)
         total = 0
         for i in self.Portfolio:
             total = getattr(i[0], "Growth_after_DD") + total
         Portfolio_mean = 0
         if self.Portfolio_size != 0:
             Portfolio_mean = total/self.Portfolio_size
-        # Attribute 7 - standard deviation of perceived growth of portfolio companies by agent (VC)
+        # Attribute 6 - standard deviation of perceived growth of portfolio companies by agent (VC)
         EPIs = []
         Portfolio_sd = 0
         if self.Portfolio_size != 0:
@@ -308,31 +326,34 @@ class VC(Agent):
             Portfolio_sd = np.std(EPIs)
         
         ## VC attributes
-        # Attribute 8 - percentage of total screening capacity left, given a portfolio size
+        # Attribute 7 - percentage of total screening capacity left, given a portfolio size
         Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
-        # Attribute 9 - VC quality
+        # Attribute 8 - VC quality
         VC_quality = self.VC_quality
-        # Attribute 10 - Endowment left (1 at the beginning)
+        # Attribute 9 - Endowment left (1 at the beginning)
         Endowement = self.Endowement
-        # Attribute 11 - Remaining of investment stage as a percentage
-        Remaining_of_investment_stage = Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
+        # Attribute 10 - Remaining of investment stage as a percentage
+        Remaining_of_investment_stage = self.Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
         
-        next_state_ = torch.tensor([Prospect_growth, Sub_Industry, Growth_sd, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+        next_state_ = torch.tensor([Prospect_growth, Growth_sd, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
         return next_state_
     
     # Executes the changes that occur at each time step
     def step(self):
         # VC only participates in matching and due diligence early on in their fund life cycle - during their investment stage
+        Portfolio_temp = self.Portfolio
         if self.Fund_age <= (Fund_maturity - Startup_exit):
-            for i in self.Screening_prospects:   
+            for i in self.Screening_prospects: 
+                    prospect_list = []  
                     end = 0
                     obs = self.get_state(i) # observe next state
                     act = agent.select_action(obs) # select next action based on the observation of the next state
-                    reward = self.get_reward(act, i) # a reward is given based on the action selected
                     if min_endowment_per_investment <= act <=1 and float(act) <= self.Endowement:
-                        i[0].VC_investments.append(self) # Assign investor to startup
-                        self.Portfolio.append(i+[float(act)]+[float(getattr(i[0],"Growth_after_DD"))]+[float(self.Fund_age)]) # add the startup to the portfolio
+                        i.VC_investments.append(self) # Assign investor to startup
+                        prospect_list.append(i)
+                        self.Portfolio.append(prospect_list+[float(act)]+[float(getattr(i,"Growth_after_DD"))]+[float(self.Fund_age)]) # add the startup to the portfolio
                         self.Endowement = self.Endowement - float(act) # subtract action (investment) from endowment
+                    reward = self.get_reward(act, Portfolio_temp) # a reward is given based on the action selected
                     new_state = self.get_next_state(act, obs) # get the next state based on the action and the observation
                     agent.remember(obs, act, reward, new_state, int(end)) # store the memory (s,a,r,s') in the replay buffer
                     agent.learn() # update network parameters
@@ -436,7 +457,7 @@ class Startup(Agent):
             noise_reduction_VC_quality = self.average_investor_quality()
         # if there are both VC investors and potential investors, the average of the two means is taken
         else:
-            noise_reduction_VC_quality = (self.average_investor_quality + self.average_potential_investor_quality)/2
+            noise_reduction_VC_quality = (self.average_investor_quality() + self.average_potential_investor_quality())/2
 
         # 1 minus the VC quality for noise reduction is applied as a product of the standard deviation of the random noise, so the noise reduction is greater with a greater VC quality
         if self.Life_stage == 0:
@@ -464,17 +485,20 @@ class Startup(Agent):
 # Activation class, determines in which order agents are activated
 class Activation_1(BaseScheduler):
     def step(self):
+        # Shuffle the agents to activate them in random order
+        random.shuffle(self.agents)
         # First, startups are activated
-        for agent in self.agent_buffer(shuffled=True):
+        for agent in self.agents:
             if agent.unique_id >= world.VC_number:
                 agent.step()
                 
 class Activation_2(BaseScheduler):
     def step(self):
+        # Shuffle the agents to activate them in random order
+        random.shuffle(self.agents)
         # Then, VCs are activated
-        for agent in self.agent_buffer(shuffled=True):
+        for agent in self.agents:
             if agent.unique_id < world.VC_number:
-                # After agents are activated, we update the step value
                 agent.step()
         
 
@@ -498,7 +522,7 @@ class World(Model):
             if Normalised_TVPI > 1:
                 Normalised_TVPI = 0.99
             # Normalised_TVPI is passed as VC quality
-            a = VC(i,float(Normalised_TVPI),int(random.choices(Number_of_analysts_list, Number_of_analysts_probabilities)),0,self)
+            a = VC(i,float(Normalised_TVPI),random.choices(Number_of_analysts_list, Number_of_analysts_probabilities)[0],0,self)
             self.schedule_2.add(a)
             self.VCs.append(a)            
         
@@ -511,7 +535,7 @@ class World(Model):
     def generate_startups(self):        
         for j in range (Number_of_VCs + self.schedule_1.steps*Number_of_new_startups, Number_of_VCs +  (self.schedule_1.steps+1)*Number_of_new_startups):
             # Get a sub-industry by random choice 
-            Sub_Industry = random.choices(List_of_Sub_Industries, Probability_Distribution_of_Sub_Industries)
+            Sub_Industry = random.choices(List_of_Sub_Industries, Probability_Distribution_of_Sub_Industries)[0]
             # create the startup, and assign a revenue growth based on the distribution corresponding to the sub-industry
             b = Startup(j, skewnorm.rvs(Growth_a, Sub_Industry_loc[Sub_Industry], Sub_Industry_scale[Sub_Industry]), Sub_Industry, 0, self)
             # add the startup to the schedule
@@ -523,8 +547,8 @@ class World(Model):
         for i in world.Prospects:
             for j in world.VCs:
                 if getattr(j, "Number_of_available_screenings") >= 1+ len(getattr(j, "Screening_prospects")):
-                    j.Screening_prospects.append([i])
-                    i.VC_potential_investments.append([j])
+                    j.Screening_prospects.append(i)
+                    i.VC_potential_investments.append(j)
                     index += 1
                 # Ensures each prospect only gets the number of DD investors.
                 if index == Number_of_DD_investors:
@@ -567,11 +591,11 @@ for i in world.VCs:
         # Access elements from j[1] onwards - do not include j[0] as this is the startup itself (j[1] onwards includes amount invested, growth after DD, and fund age)
         for z in j[1:]:
             Transit.append(z)
-        Transit.append(j[0].Sub_Industry[0])
+        Transit.append(j[0].Sub_Industry)
 
         Portfolio_data = [Transit] + Portfolio_data   
 
 # Export the portfolio data to a spreadsheet
-df2 = pd.DataFrame(np.array(Portfolio_data), columns = ["Unique_id_VC", "Unique_id_Startup", "Growth_final", "Return","Amount_Invested", "Growth_after_DD", "Fund_age", "Sub_Industry"])
+df2 = pd.DataFrame(np.array(Portfolio_data), columns = ["Unique_id_VC", "Unique_id_Startup", "Growth_final", "Return","Amount_Invested", "Growth_after_DD", "Fund_age_when_invested", "Sub_Industry"])
 df2.to_excel("Portfolio_data.xlsx")
 print(df2) 
