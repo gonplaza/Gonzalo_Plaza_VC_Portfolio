@@ -19,7 +19,7 @@ from operator import attrgetter
 from SSTD3 import Agent, ReplayBuffer, OUNoise, Critic, Actor, Softmax
 import torch
 
-number_of_simulations = 100
+number_of_simulations = 1
 Portfolio_size_data = []
 Simulation_number = []
 
@@ -32,7 +32,7 @@ for sim in range(number_of_simulations):
 
     ## VC Coefficients
     # VC Coefficients - general
-    Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
+    Number_of_VCs = 10 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
     Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
     Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
     Average_portfolio_size = 32 #Based on real world data
@@ -323,12 +323,12 @@ for sim in range(number_of_simulations):
             if self.Portfolio_size != 0:
                 Portfolio_mean = total/self.Portfolio_size
             # Attribute 6 - standard deviation of perceived growth of portfolio companies by agent (VC)
-            EPIs = []
+            growths = []
             Portfolio_sd = 0
             if self.Portfolio_size != 0:
                 for i in self.Portfolio:
-                    EPIs.append(getattr(i[0], "Growth_after_DD"))
-                Portfolio_sd = np.std(EPIs)
+                    growths.append(getattr(i[0], "Growth_after_DD"))
+                Portfolio_sd = np.std(growths)
             
             ## VC attributes
             # Attribute 7 - percentage of total screening capacity left, given a portfolio size
@@ -388,7 +388,6 @@ for sim in range(number_of_simulations):
             self.Life_stage = Life_stage
             self.Growth_with_noise = 0
             self.Growth_after_DD = 0
-            self.VC_potential_investments = []
             self.VC_investments = []
         
         # Calculate the average quality of the VC investing in a particular startup
@@ -401,17 +400,8 @@ for sim in range(number_of_simulations):
             # if no VC has invested in a particular startup, then return zero
             if len(self.VC_investments) == 0:
                 return 0
-            
-        def average_potential_investor_quality(self):
-            total = 0
-            if len(self.VC_potential_investments) != 0:
-                for i in self.VC_potential_investments:
-                    total = getattr(i, "VC_quality") + total
-                return total/len(self.VC_potential_investments)
-            # if no potential investors, then return zero
-            if len(self.VC_investments) == 0:
-                return 0
         
+
         # Startup progress in time                           
         def time_progression(self):
             # if no VC has ivnested in the startup yet, then progress without considering advisory form VC
@@ -445,7 +435,7 @@ for sim in range(number_of_simulations):
             ## The following lines calculate and normalise VC quality, as it is used to reduce the noise for growth after DD
             # if no VC investors or potential investors yet, growth_with_noise is used as an approximation to VC Quality as the matching is done between these two - /
             # the cdf of the growth with noise is computed, then applied to the VC_quality distribution, and normalised.
-            if len(self.VC_investments) == 0 and len(self.VC_potential_investments) == 0:
+            if len(self.VC_investments) == 0:
                 VC_quality_cdf = skewnorm.cdf(self.Growth_with_noise, Growth_a, Growth_loc, Growth_scale)
                 noise_reduction_VC_quality = lognorm.ppf(VC_quality_cdf, VC_quality_shape, VC_quality_loc, VC_quality_scale)/VC_quality_max
                 # Ensure that the normalised VC quality for noise reduction is between 0 and 1
@@ -453,15 +443,9 @@ for sim in range(number_of_simulations):
                     noise_reduction_VC_quality = 0.01
                 if noise_reduction_VC_quality >= 1:
                     noise_reduction_VC_quality = 0.99
-            # if there are potential VC investors but no actual VC investors, the average VC quality of the potential investors is used
-            elif len(self.VC_investments) == 0:
-                noise_reduction_VC_quality = self.average_potential_investor_quality()
-            # if there are no potential VC investors put there are actual VC investors, the average VC quality of the actual investors is used
-            elif len(self.VC_potential_investments) == 0:
-                noise_reduction_VC_quality = self.average_investor_quality()
-            # if there are both VC investors and potential investors, the average of the two means is taken
+            # if there are VC investors, the average of the two means is taken
             else:
-                noise_reduction_VC_quality = (self.average_investor_quality() + self.average_potential_investor_quality())/2
+                noise_reduction_VC_quality = self.average_investor_quality()
 
             # 1 minus the VC quality for noise reduction is applied as a product of the standard deviation of the random noise, so the noise reduction is greater with a greater VC quality
             if self.Life_stage == 0:
@@ -494,8 +478,7 @@ for sim in range(number_of_simulations):
             random.shuffle(self.agents)
             # First, startups are activated
             for agent in self.agents:
-                if agent.unique_id >= world.VC_number:
-                    agent.step()
+                agent.step()
                     
     class Activation_2(BaseScheduler):
         def step(self):
@@ -503,8 +486,7 @@ for sim in range(number_of_simulations):
             random.shuffle(self.agents)
             # Then, VCs are activated
             for agent in self.agents:
-                if agent.unique_id < world.VC_number:
-                    agent.step()
+                agent.step()
             
 
     class World(Model):
@@ -537,9 +519,9 @@ for sim in range(number_of_simulations):
             agent_reporters={"Growth": lambda a: getattr(a, "Growth", None)}
             )
 
-        # Creating Agents - Startups_early stage
+        # Creating Agents - Startups
         def generate_startups(self):        
-            for j in range (Number_of_VCs + self.schedule_1.steps*Number_of_new_startups, Number_of_VCs +  (self.schedule_1.steps+1)*Number_of_new_startups):
+            for j in range (self.schedule_1.steps*Number_of_new_startups, self.schedule_1.steps+1*Number_of_new_startups):
                 # Get a sub-industry by random choice 
                 Sub_Industry = random.choices(List_of_Sub_Industries, Probability_Distribution_of_Sub_Industries)[0]
                 # create the startup, and assign a revenue growth based on the distribution corresponding to the sub-industry
@@ -550,11 +532,13 @@ for sim in range(number_of_simulations):
                 
         def matching_prospects_to_VCs(self):
             index = 0
+            # clear list of screening prospects before adding new prospects 
+            for k in world.VCs:
+                k.Screening_prospects = []
             for i in world.Prospects:
                 for j in world.VCs:
                     if getattr(j, "Number_of_available_screenings") >= 1+ len(getattr(j, "Screening_prospects")):
                         j.Screening_prospects.append(i)
-                        i.VC_potential_investments.append(j)
                         index += 1
                     # Ensures each prospect only gets the number of DD investors.
                     if index == Number_of_DD_investors:
@@ -569,10 +553,19 @@ for sim in range(number_of_simulations):
             self.schedule_1.step()
             self.matching_prospects_to_VCs()
             self.schedule_2.step()
+
+            # remove startups that are bankrupt - past their first quarter and not invested in
+            to_remove = [startup for startup in self.schedule_1.agents if len(getattr(startup,"VC_investments")) == 0 and getattr(startup,"Life_stage") != 0]
+            for startup in to_remove:
+                self.schedule_1.remove(startup)
+
             self.schedule_1.steps += 1
             self.schedule_1.time += 1
             self.counter += 1
             print("Step",self.counter)
+            print("Prospects:", len(self.Prospects))
+
+
 
 
     # Perform steps - simulation
@@ -604,6 +597,7 @@ for sim in range(number_of_simulations):
 
             Portfolio_data = [Transit] + Portfolio_data   
     avg_portfolio_size = avg_portfolio_size/Number_of_VCs
+    print(avg_portfolio_size)
     Portfolio_size_data.append(avg_portfolio_size)
     Simulation_number.append(sim)
 
