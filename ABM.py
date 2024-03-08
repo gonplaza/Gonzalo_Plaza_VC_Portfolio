@@ -188,7 +188,6 @@ for sim in range(number_of_simulations):
                     for j in Portfolio:
                         weight_i = i[1]/(1-self.Endowement)
                         weight_j = j[1]/(1-self.Endowement)
-                        #########
                         sd_i = (Noise_sd_before_DD[getattr(i[0], "Sub_Industry")]**2 + Idiosyncratic_risk_sd**2)**(1/2)
                         sd_j = (Noise_sd_before_DD[getattr(j[0], "Sub_Industry")]**2 + Idiosyncratic_risk_sd**2)**(1/2)
                         Correlation_coeff =  float(Subindustry_correlation_matrix.loc[getattr(i[0], "Sub_Industry"), getattr(j[0], "Sub_Industry")]) 
@@ -212,13 +211,13 @@ for sim in range(number_of_simulations):
             if len(Portfolio) == 0:
                 return 0
             else:
-                return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_variance(Portfolio))
+                return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_variance(Portfolio)**(1/2))
             
         def final_Sharpe_ratio(self, Portfolio):
             if len(Portfolio) == 0:
                 return 0
             else:
-                return float(self.final_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio))
+                return float(self.final_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio)**(1/2))
         
         """
         def expected_portfolio_downside_deviation(self, Portfolio):
@@ -243,35 +242,7 @@ for sim in range(number_of_simulations):
             else:
                 return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
         """
-        """
-        # Gets reward after taking action a 
-        def get_reward(self, action, old_portfolio):
-            # Only can invest if within investment period
-            if self.Fund_age <= (Fund_maturity - Startup_exit):  
-                # Endowment cannot be negative 
-                if action < 0:
-                    return torch.tensor([-100*(-action[0])])
-                # If less than the minimum endowment was invested, we assume that VC does not invest into a given startup
-                if 0 < action < min_endowment_per_investment:
-                    return torch.tensor([0])
-                # If action is more than the minimum endowment but less than 1, then VC invests in startup, and the reward is the Sortino ratio after minus Sortino ratio before
-                if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
-                    #return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
-                    return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio))])
-                # If there is not enough endowment, no investment occurs
-                if min_endowment_per_investment <= action <= 1 and action > self.Endowement:
-                    return torch.tensor([-100*(action[0]-self.Endowement)])
-                # Action cannot be more than 1
-                if action>1:
-                    return torch.tensor([-100*action[0]])
-            # No investment if investment period is past
-            elif world.counter == (Fund_maturity-Startup_exit):
-                return torch.tensor([-self.Endowement])
-            elif world.counter == (Fund_maturity - 1):
-                return torch.tensor([self.final_Sharpe_ratio(self.Portfolio)])
-            else:
-                return torch.tensor([-10])
-        """    
+
                 # Gets reward after taking action a 
         def get_reward(self, action, old_portfolio):
             # Only can invest if within investment period
@@ -280,7 +251,7 @@ for sim in range(number_of_simulations):
                 if action < 0:
                     return torch.tensor([-100*(-action[0])])
                 # If less than the minimum endowment was invested, we assume that VC does not invest into a given startup
-                if 0 < action < min_endowment_per_investment:
+                if 0 <= action < min_endowment_per_investment:
                     return torch.tensor([0])
                 # If action is more than the minimum endowment but less than 1, then VC invests in startup, and the reward is the Sortino ratio after minus Sortino ratio before
                 if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
@@ -294,8 +265,8 @@ for sim in range(number_of_simulations):
                     return torch.tensor([-100*action[0]])
             # No investment if investment period is past
             else:
-                return torch.tensor([-10])
-
+                return torch.tensor([-self.Endowement])
+        
 
         # Gets state which is inputed into the RL model - this is what the agent observes
         def get_state(self, Prospect): 
@@ -463,7 +434,7 @@ for sim in range(number_of_simulations):
                 advisory_factor = self.average_investor_quality()-advisory_VC_quality_delta # VC quality distribution but same mean as the revenue growoth with good advisory
                 self.Growth = Alpha*self.Growth + (Beta*advisory_factor - additional_return_with_advisory_per_time_step) + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
             self.Life_stage += 1    
-            # Normalise so that there is no revenue growth of below -95% (impossible) or above 95% (cdf = 0.9988207293344418)
+            # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% equivalently - no extremes due to noise
             if self.Growth < -1:
                 self.Growth = -1
             if self.Growth > 1:
@@ -472,15 +443,22 @@ for sim in range(number_of_simulations):
         def noise_before_DD(self):
             # If the startup is new, the full noise is applied
             if self.Life_stage == 0:
-                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry])
+                noise = np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry])
+                self.Growth_with_noise = self.Growth + noise
+                # Keep Growth with noise within limits
+                while self.Growth_with_noise < -1:
+                    self.Growth_with_noise = self.Growth_after_DD + abs(noise)
+                while self.Growth_with_noise > 1:
+                    self.Growth_with_noise = self.Growth_after_DD - abs(noise)
             # If the startup is not new, the noise is reduced in proportion to the maturity of the startup
             else:
-                self.Growth_with_noise = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
-            # Keep perceived Growth within limits
-            if self.Growth_with_noise < -1:
-                self.Growth_with_noise = -1
-            if self.Growth_with_noise > 1:
-                self.Growth_with_noise = 1
+                noise = np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
+                self.Growth_with_noise = self.Growth + noise
+                # Keep Growth with noise within limits
+                while self.Growth_with_noise < -1:
+                    self.Growth_with_noise = self.Growth_after_DD + abs(noise)
+                while self.Growth_with_noise > 1:
+                    self.Growth_with_noise = self.Growth_after_DD - abs(noise)
 
 
         def noise_after_DD(self):
@@ -490,7 +468,7 @@ for sim in range(number_of_simulations):
             if len(self.VC_investments) == 0:
                 VC_quality_cdf = skewnorm.cdf(self.Growth_with_noise, Growth_a, Growth_loc, Growth_scale)
                 noise_reduction_VC_quality = lognorm.ppf(VC_quality_cdf, VC_quality_shape, VC_quality_loc, VC_quality_scale)/VC_quality_max
-                # Ensure that the normalised VC quality for noise reduction is between 0 and 1
+                # Ensure that the normalised VC quality for noise reduction is between 0 and 1 (not including, as too extreme/gives errors)
                 if noise_reduction_VC_quality <= 0.01:
                     noise_reduction_VC_quality = 0.01
                 if noise_reduction_VC_quality >= 0.99:
@@ -501,14 +479,21 @@ for sim in range(number_of_simulations):
 
             # 1 minus the VC quality for noise reduction is applied as a product of the standard deviation of the random noise, so the noise reduction is greater with a greater VC quality
             if self.Life_stage == 0:
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality))
+                noise = np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1.5-noise_reduction_VC_quality))
+                self.Growth_after_DD = self.Growth + noise
+                # Keep perceived Growth within limits
+                while self.Growth_after_DD < -1:
+                    self.Growth_after_DD = self.Growth_after_DD + abs(noise)
+                while self.Growth_after_DD > 1:
+                    self.Growth_after_DD = self.Growth_after_DD - abs(noise)
             else: 
-                self.Growth_after_DD = self.Growth + np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
-            # Keep perceived Growth within limits
-            if self.Growth_after_DD < -1:
-                self.Growth_after_DD = -1
-            if self.Growth_after_DD > 1:
-                self.Growth_after_DD = 1
+                noise = np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]*(1.5-noise_reduction_VC_quality)/(self.Life_stage**(1/2)))
+                self.Growth_after_DD = self.Growth + noise
+                # Keep perceived Growth within limits
+                while self.Growth_after_DD < -1:
+                    self.Growth_after_DD = self.Growth_after_DD + abs(noise)
+                while self.Growth_after_DD > 1:
+                    self.Growth_after_DD = self.Growth_after_DD - abs(noise)
         
         # Executes the changes that occur at each time step
         def step(self):
