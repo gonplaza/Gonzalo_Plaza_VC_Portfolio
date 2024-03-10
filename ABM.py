@@ -19,7 +19,7 @@ from operator import attrgetter
 from SSTD3 import Agent, ReplayBuffer, OUNoise, Critic, Actor, Softmax
 import torch
 
-number_of_simulations = 10
+number_of_simulations = 50
 Portfolio_size_data = []
 Simulation_number = []
 Statistics_on_VCs = []
@@ -31,10 +31,11 @@ for sim in range(number_of_simulations):
     np.random.seed(0) # enables consisent outputs from random number generation
     if sim != 0:
         agent.load_model_parameters() # load the trained model parameters for all the networks
+    print("Simulation", sim)
 
     ## VC Coefficients
     # VC Coefficients - general
-    Number_of_VCs = 10 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
+    Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
     Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
     Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
     Average_portfolio_size = 32 #Based on real world data
@@ -147,11 +148,11 @@ for sim in range(number_of_simulations):
             self.Remaining_of_investment_stage = max(0, (Fund_maturity - Startup_exit - self.Fund_age)) # Investment stage is 2 years, so (10 years - 8 years - fund age)
         
             
-        # This function enables us to map final revenue growth (startup potential) into returns
+        # This function enables us to map revenue growth (startup potential) into returns
         def Growth_to_returns(self, growth):
             # This gives us probability of observing a growth less or equal to observed value - using the same probability distribution for all here (the average)
             Growth_cdf = skewnorm.cdf(growth, Growth_a, Growth_loc, Growth_scale)
-            # return distribution of returns mapped from the final revenue growth data
+            # distribution of returns mapped from the revenue growth data
             return float(sampled_VC_return_data[int(sample_size*Growth_cdf)])
 
 
@@ -172,8 +173,8 @@ for sim in range(number_of_simulations):
 
 
 
-        # Calculate the final return when the portfolio is divested    
-        def final_return(self, Portfolio):
+        # Calculate the actual return of the portfolio   
+        def actual_return(self, Portfolio):
             Return = 0
             for i in Portfolio:
                 # i[1] used as a weight here too
@@ -199,9 +200,10 @@ for sim in range(number_of_simulations):
             Avg_return = 0
             for i in Portfolio:
                 Avg_return = float(self.Growth_to_returns(getattr(i[0], "Growth"))) + Avg_return
-            Avg_return = Avg_return/self.Portfolio_size
+            Avg_return = Avg_return/len(Portfolio)
             for j in Portfolio:
                 Total_variance = abs((float(self.Growth_to_returns(getattr(i[0], "Growth"))) - Avg_return)**(2)) + Total_variance
+            Total_variance = Total_variance/len(Portfolio)
             return Total_variance
 
         
@@ -212,12 +214,12 @@ for sim in range(number_of_simulations):
                 return 0
             else:
                 return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_variance(Portfolio)**(1/2))
-            
-        def final_Sharpe_ratio(self, Portfolio):
+        
+        def actual_Sharpe_ratio(self, Portfolio):
             if len(Portfolio) == 0:
                 return 0
             else:
-                return float(self.final_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio)**(1/2))
+                return float(self.actual_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio)**(1/2))
         
         """
         def expected_portfolio_downside_deviation(self, Portfolio):
@@ -265,7 +267,7 @@ for sim in range(number_of_simulations):
                     return torch.tensor([-100*action[0]])
             # No investment if investment period is past
             else:
-                return torch.tensor([-self.Endowement])
+                return torch.tensor([(self.actual_Sharpe_ratio-self.Endowement)])
         
 
         # Gets state which is inputed into the RL model - this is what the agent observes
@@ -615,7 +617,7 @@ for sim in range(number_of_simulations):
 
     # Get statistics on VC agents
     for i in world.VCs:
-        Statistics_on_VCs = [[sim, i.unique_id, i.VC_quality, i.Portfolio_size, i.Endowement, i.Investment_analysts, i.final_return(i.Portfolio)]] + Statistics_on_VCs
+        Statistics_on_VCs = [[sim, i.unique_id, i.VC_quality, i.Portfolio_size, i.Endowement, i.Investment_analysts, i.actual_return(i.Portfolio)]] + Statistics_on_VCs
 
 
     avg_portfolio_size = 0    
