@@ -53,7 +53,7 @@ class ReplayBuffer(object):
 
 
 class OUNoise:
-    def __init__(self, size, mu=0, theta=0.15, sigma=0.2, dt=0.002, x0=None):
+    def __init__(self, size, mu=0, theta=0.15, sigma=0.028, dt=0.002, x0=None):
         # parameters for the Ornstein-Uhlenbeck noise
         self.mu = mu * np.ones(size)
         self.theta = theta
@@ -70,7 +70,7 @@ class OUNoise:
     def noise(self):
         # Generates OU noise 
         x = self.state
-        dx = self.theta * (self.mu - x) * self.dt + self.sigma * np.sqrt(self.dt) * np.random.randn(len(x))
+        dx = self.theta*(self.mu-x)*self.dt + self.sigma*np.sqrt(self.dt)*np.random.randn(len(x))
         self.state = x + dx
         return self.state
 
@@ -83,16 +83,10 @@ class OUNoise:
 class Softmax:
 	# function to calculate weights using the softmax operator
 	def softmax(self, x):
-		#x = x.detach().numpy()
-		#exp_x = np.exp(x)
-		#return exp_x / np.sum(exp_x)
-		# PyTorch's softmax function is used directly
 		return F.softmax(x, dim=-1)
 
     # calculate the weights for the Q-values, and return the final Q-value with the weights swapped
 	def swap(self, q1, q2):
-		#s_weights = self.softmax([q1, q2])
-		#w1, w2 = s_weights
 		q_values = torch.stack([q1, q2], dim=0)
 		s_weights = self.softmax(q_values)
 		# Extract softmax weights for each Q-value.
@@ -243,7 +237,7 @@ class Agent(object):
 
 		self.softmax_operator = Softmax()
 		
-		self.noise = OUNoise(size=action_dim, mu=0, theta=0.15, sigma=0.2) # initialise noise class
+		self.noise = OUNoise(size=action_dim) # initialise noise class
 		
 		self.memory = ReplayBuffer(self.state_dim, self.action_dim, self.max_size) # initialise replay buffer class
 
