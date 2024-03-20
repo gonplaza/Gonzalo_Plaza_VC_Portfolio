@@ -258,7 +258,7 @@ for sim in range(number_of_simulations):
                 # If action is more than the minimum endowment but less than 1, then VC invests in startup, and the reward is the Sortino ratio after minus Sortino ratio before
                 if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
                     #return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
-                    return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio))])
+                    return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio) - 100*self.Endowement)])
                 # If there is not enough endowment, no investment occurs
                 if min_endowment_per_investment <= action <= 1 and action > self.Endowement:
                     return torch.tensor([-100*(action[0]-self.Endowement)])
@@ -267,7 +267,7 @@ for sim in range(number_of_simulations):
                     return torch.tensor([-100*action[0]])
             # No investment if investment period is past
             else:
-                return torch.tensor([(self.actual_Sharpe_ratio-10*self.Endowement)])
+                return torch.tensor([(self.actual_Sharpe_ratio-self.Endowement)])
         
 
         # Gets state which is inputed into the RL model - this is what the agent observes
@@ -505,8 +505,9 @@ for sim in range(number_of_simulations):
             #Collecting the prospects for this time step, 
             if self.Life_stage == 0 and world.counter < (Fund_maturity-Startup_exit):
                 world.Prospects.append(self)
-            # We also make all the startups progress in time    
-            self.time_progression()  
+            # We also make all the startups progress in time when they haven't reached their exit yet
+            if self.Life_stage <= Startup_exit:    
+                self.time_progression()  
             
         
             
