@@ -46,10 +46,7 @@ for sim in range(number_of_simulations):
     VC_quality_loc = -0.485 # location coefficient for lognormal distribution
     VC_quality_scale = 1.701 # scale coefficient for lognormal distribution
     VC_quality_max = 5.11 # 99.9% of the values for VC quality will be lower than 5.11, so it is used to normalise VC quality between 0 and 1.
-    normalised_mean_VC_quality = lognorm.stats(VC_quality_shape, VC_quality_loc, VC_quality_scale, moments='m')/VC_quality_max # used for the advisory factor in time progession
-    additional_return_with_advisory = 0.1 # mean additional return that a startup generates with good advisory from the VC
-    additional_return_with_advisory_per_time_step = additional_return_with_advisory/Startup_exit # reduced to per time step
-    advisory_VC_quality_delta = normalised_mean_VC_quality - 0.244 # this is done so that the advisory factor has the same mean as the the mean revenue growth rate (14.4%) plus 10% (mean increase in growth due to good advisory) = 24.4%
+    advisory_VC_quality_delta = 0.12 # this is done so that the advisory factor has the same mean as the the mean revenue growth rate (14.4%) 
 
 
     # VC attributes - Employees
@@ -85,11 +82,11 @@ for sim in range(number_of_simulations):
 
     # Startup Coefficients - Time progression equation
     # Gorwth = Alpha*Growth + Beta*Advisory + Idiosyncratic risk
-    Beta = 1/Startup_exit # beta coefficient for time progression equation. Expresses the weight of VC quality (advisory)
+    Beta = 0.00455 # beta coefficient for time progression equation. Expresses the weight of VC quality (advisory)
     Alpha = 1- Beta # alpha coefficient for time progression equation. Expresses weight of revenue growth
 
     Idiosyncratic_risk_mean = 0 # mean for normal distribution for idiosyncratic risk
-    Idiosyncratic_risk_sd = 0.212 # standard deviation for normal distribution for idiosyncratic risk
+    Idiosyncratic_risk_sd = 0.0754 # standard deviation for normal distribution for idiosyncratic risk
 
     # Startup Coefficeints - Sub_Industries - same probability for each - random choice
     List_of_Sub_Industries = ["Sub_Industry_1", "Sub_Industry_2", "Sub_Industry_3", "Sub_Industry_4", "Sub_Industry_5"]
@@ -221,29 +218,6 @@ for sim in range(number_of_simulations):
             else:
                 return float(self.actual_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio)**(1/2))
         
-        """
-        def expected_portfolio_downside_deviation(self, Portfolio):
-            sigma_d = 0
-            for i in Portfolio:
-                Projected_Growth = getattr(i[0], "Growth_after_DD")
-                # calculate expected deviation from target return for each startup
-                Dev = float(self.Growth_to_returns(Projected_Growth) - Compounded_risk_free_rate)
-                Dev_squared = Dev**2
-                # if the deviation is negative, sum the squared deviation
-                if Dev < 0:
-                    sigma_d = sigma_d + Dev_squared
-            # calculate the expected downside deviation from the sum of the downside squared deviations
-            sigma_d = sigma_d/len(Portfolio)
-            sigma_d = sigma_d**(1/2)
-            return sigma_d
-                
-        # Expected Sortino ratio
-        def expected_Sortino_ratio(self, Portfolio):  
-            if len(Portfolio) == 0:
-                return 0
-            else:
-                return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_downside_deviation(Portfolio))
-        """
 
                 # Gets reward after taking action a 
         def get_reward(self, action, old_portfolio):
@@ -434,7 +408,7 @@ for sim in range(number_of_simulations):
                 self.Growth = self.Growth + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
             else:
                 advisory_factor = self.average_investor_quality()-advisory_VC_quality_delta # VC quality distribution but same mean as the revenue growoth with good advisory
-                self.Growth = Alpha*self.Growth + (Beta*advisory_factor - additional_return_with_advisory_per_time_step) + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
+                self.Growth = Alpha*self.Growth + Beta*advisory_factor + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
             self.Life_stage += 1    
             # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% equivalently - no extremes due to noise
             if self.Growth < -1:
@@ -449,18 +423,18 @@ for sim in range(number_of_simulations):
                 self.Growth_with_noise = self.Growth + noise
                 # Keep Growth with noise within limits
                 while self.Growth_with_noise < -1:
-                    self.Growth_with_noise = self.Growth_after_DD + abs(noise)
+                    self.Growth_with_noise = self.Growth_with_noise + abs(noise)
                 while self.Growth_with_noise > 1:
-                    self.Growth_with_noise = self.Growth_after_DD - abs(noise)
+                    self.Growth_with_noise = self.Growth_with_noise - abs(noise)
             # If the startup is not new, the noise is reduced in proportion to the maturity of the startup
             else:
                 noise = np.random.normal(Noise_mean_before_DD, 2*Noise_sd_before_DD[self.Sub_Industry]/(self.Life_stage**(1/2)))
                 self.Growth_with_noise = self.Growth + noise
                 # Keep Growth with noise within limits
                 while self.Growth_with_noise < -1:
-                    self.Growth_with_noise = self.Growth_after_DD + abs(noise)
+                    self.Growth_with_noise = self.Growth_with_noise + abs(noise)
                 while self.Growth_with_noise > 1:
-                    self.Growth_with_noise = self.Growth_after_DD - abs(noise)
+                    self.Growth_with_noise = self.Growth_with_noise - abs(noise)
 
 
         def noise_after_DD(self):
