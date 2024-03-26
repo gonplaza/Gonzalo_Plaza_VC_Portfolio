@@ -39,7 +39,7 @@ for sim in range(number_of_simulations):
     Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
     Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
     Average_portfolio_size = 32 #Based on real world data
-    min_endowment_per_investment = 0.005 # Avoids the algorithm from making investments too small - limits max number of investments to 200 per fund (with noise accounted for, which sum to max 0.005)
+    min_endowment_per_investment = 0.0025 # Avoids the algorithm from making investments too small - limits max number of investments to 200 per fund (with noise accounted for, which sum to max 0.005)
 
     # VC Coefficients - VC quality and advisory
     VC_quality_shape = 0.385 # shape coefficient for lognormal distribution
@@ -213,7 +213,7 @@ for sim in range(number_of_simulations):
                 # If action is more than the minimum endowment but less than 1, then VC invests in startup, and the reward is the Sortino ratio after minus Sortino ratio before
                 if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
                     #return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
-                    return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio) - 1000*self.Endowement)])
+                    return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio))])
                 # If there is not enough endowment, no investment occurs
                 if min_endowment_per_investment <= action <= 1 and action > self.Endowement:
                     return torch.tensor([-100*(action[0]-self.Endowement)])
