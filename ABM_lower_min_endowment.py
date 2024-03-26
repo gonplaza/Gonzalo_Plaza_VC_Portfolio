@@ -39,7 +39,7 @@ for sim in range(number_of_simulations):
     Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
     Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
     Average_portfolio_size = 32 #Based on real world data
-    min_endowment_per_investment = 0.0025 # Avoids the algorithm from making investments too small - limits max number of investments to 200 per fund (with noise accounted for, which sum to max 0.005)
+    min_endowment_per_investment = 0.005 # Avoids the algorithm from making investments too small - limits max number of investments to 200 per fund (with noise accounted for, which sum to max 0.005)
 
     # VC Coefficients - VC quality and advisory
     VC_quality_shape = 0.385 # shape coefficient for lognormal distribution
@@ -86,7 +86,7 @@ for sim in range(number_of_simulations):
     Alpha = 1- Beta # alpha coefficient for time progression equation. Expresses weight of revenue growth
 
     Idiosyncratic_risk_mean = 0 # mean for normal distribution for idiosyncratic risk
-    Idiosyncratic_risk_sd = 0.0754 # standard deviation for normal distribution for idiosyncratic risk
+    Idiosyncratic_risk_sd = 0.123 # standard deviation for normal distribution for idiosyncratic risk
 
     # Startup Coefficeints - Sub_Industries - same probability for each - random choice
     List_of_Sub_Industries = ["Sub_Industry_1", "Sub_Industry_2", "Sub_Industry_3", "Sub_Industry_4", "Sub_Industry_5"]
@@ -162,12 +162,11 @@ for sim in range(number_of_simulations):
             else:
                 # Get expected return based on the current revenue growth
                 for i in Portfolio:
-                    Projected_Growth = getattr(i[0], "Growth_after_DD")
+                    Projected_Growth = getattr(i[0], "Growth")
 
                     # i[1] would correspond to the action on the startup, that is the amount invested (so it is used as weight for portfolio return)
                     Return = float((self.Growth_to_returns(Projected_Growth)*i[1]))+ Return
                 return Return
-
 
 
         # Calculate the actual return of the portfolio   
@@ -191,19 +190,7 @@ for sim in range(number_of_simulations):
                         Correlation_coeff =  float(Subindustry_correlation_matrix.loc[getattr(i[0], "Sub_Industry"), getattr(j[0], "Sub_Industry")]) 
                         Total_variance = (weight_i*weight_j*Correlation_coeff*sd_i*sd_j) + Total_variance
             return Total_variance
-        
-        def portfolio_variance(self, Portfolio):
-            Total_variance = 0
-            Avg_return = 0
-            for i in Portfolio:
-                Avg_return = float(self.Growth_to_returns(getattr(i[0], "Growth"))) + Avg_return
-            Avg_return = Avg_return/len(Portfolio)
-            for j in Portfolio:
-                Total_variance = abs((float(self.Growth_to_returns(getattr(i[0], "Growth"))) - Avg_return)**(2)) + Total_variance
-            Total_variance = Total_variance/len(Portfolio)
-            return Total_variance
 
-        
             
         # Expected Sharpe ratio
         def expected_Sharpe_ratio(self, Portfolio):  
@@ -211,13 +198,7 @@ for sim in range(number_of_simulations):
                 return 0
             else:
                 return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_variance(Portfolio)**(1/2))
-        
-        def actual_Sharpe_ratio(self, Portfolio):
-            if len(Portfolio) == 0:
-                return 0
-            else:
-                return float(self.actual_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio)**(1/2))
-        
+
 
                 # Gets reward after taking action a 
         def get_reward(self, action, old_portfolio):
@@ -232,16 +213,16 @@ for sim in range(number_of_simulations):
                 # If action is more than the minimum endowment but less than 1, then VC invests in startup, and the reward is the Sortino ratio after minus Sortino ratio before
                 if min_endowment_per_investment <= action <= 1 and action <= self.Endowement:
                     #return torch.tensor([(self.expected_Sortino_ratio((self.Portfolio + [list(startup) + list(action)])) - self.expected_Sortino_ratio(self.Portfolio))])
-                    return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio))])
+                    return torch.tensor([(self.expected_Sharpe_ratio(self.Portfolio) - self.expected_Sharpe_ratio(old_portfolio) - 1000*self.Endowement)])
                 # If there is not enough endowment, no investment occurs
                 if min_endowment_per_investment <= action <= 1 and action > self.Endowement:
                     return torch.tensor([-100*(action[0]-self.Endowement)])
                 # Action cannot be more than 1
                 if action>1:
                     return torch.tensor([-100*action[0]])
-            # No investment if investment period is past
+            # No investment if investment period is past - actually has no effect as no decisions are made once the investment stage is passed.
             else:
-                return torch.tensor([(self.actual_Sharpe_ratio-self.Endowement)])
+                return torch.tensor([0])
         
 
         # Gets state which is inputed into the RL model - this is what the agent observes
@@ -444,14 +425,14 @@ for sim in range(number_of_simulations):
             if len(self.VC_investments) == 0:
                 VC_quality_cdf = skewnorm.cdf(self.Growth_with_noise, Growth_a, Growth_loc, Growth_scale)
                 noise_reduction_VC_quality = lognorm.ppf(VC_quality_cdf, VC_quality_shape, VC_quality_loc, VC_quality_scale)/VC_quality_max
+                # Ensure that the normalised VC quality for noise reduction is between 0 and 1 (not including, as too extreme/gives errors)
+                if noise_reduction_VC_quality <= 0.01:
+                    noise_reduction_VC_quality = 0.01
+                if noise_reduction_VC_quality >= 0.99:
+                    noise_reduction_VC_quality = 0.99
             # if there are VC investors, the average of the two means is taken
             else:
                 noise_reduction_VC_quality = self.average_investor_quality()
-            # Ensure that the normalised VC quality for noise reduction is between 0 and 1 (not including, as too extreme/gives errors)
-            if noise_reduction_VC_quality <= 0.01:
-                noise_reduction_VC_quality = 0.01
-            if noise_reduction_VC_quality >= 0.99:
-                noise_reduction_VC_quality = 0.99
 
             # 1 minus the VC quality for noise reduction is applied as a product of the standard deviation of the random noise, so the noise reduction is greater with a greater VC quality
             if self.Life_stage == 0:
