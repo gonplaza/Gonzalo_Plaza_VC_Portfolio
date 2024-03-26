@@ -27,7 +27,7 @@ Portfolio_data = []
 
 for sim in range(number_of_simulations):
 
-    agent = Agent(state_dim = 9, action_dim = 1) # Initialise the agent
+    agent = Agent(state_dim = 10, action_dim = 1) # Initialise the agent
     np.random.seed(0) # enables consisent outputs from random number generation
     if sim != 0:
         agent.load_model_parameters() # load the trained model parameters for all the networks
@@ -35,7 +35,7 @@ for sim in range(number_of_simulations):
 
     ## VC Coefficients
     # VC Coefficients - general
-    Number_of_VCs = 10 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
+    Number_of_VCs = 100 # 48,000 VCs in the world, but keeping it to 100 for computational reasons
     Fund_maturity = 40 # number of time steps to realise returns (10 years) - each time step is 3 months (one quarter)
     Startup_exit = 32 # number of time steps it takes a startup to exit (8 years)
     Average_portfolio_size = 32 #Based on real world data
@@ -46,7 +46,7 @@ for sim in range(number_of_simulations):
     VC_quality_loc = -0.485 # location coefficient for lognormal distribution
     VC_quality_scale = 1.701 # scale coefficient for lognormal distribution
     VC_quality_max = 5.11 # 99.9% of the values for VC quality will be lower than 5.11, so it is used to normalise VC quality between 0 and 1.
-    advisory_VC_quality_delta = 0.12 # this is done so that the advisory factor has the same mean as the the mean revenue growth rate (14.4%) 
+    advisory_VC_quality_delta = 0.12 # this is done so that the advisory factor has the same mean as the the mean revenue growth rate (14.4%)
 
 
     # VC attributes - Employees
@@ -63,8 +63,8 @@ for sim in range(number_of_simulations):
 
     # VC Coefficients - Time needed
     DD_time = 60 # Time in hours needed to perform due diligence a startup
-    Advising_time = 45 # Time in hours needed per time step (i.e. 3 months) to advise to a startup in the portfolio 
-    DDs_per_quarter_per_firm = 42 # for sensitivity analysis
+    Advising_time = 45 # Time in hours needed per time step (i.e. 3 months) to advise to a startup in the portfolio
+    DDs_per_quarter_per_firm = 83 # Fixed number of DDs a firm can do per timestep, independent of number of analysts
 
     # VC Coefficients - Returns
     VC_returns_alpha = 2.06 # alpha coefficient for power law distribution of VC retruns
@@ -87,7 +87,7 @@ for sim in range(number_of_simulations):
     Alpha = 1- Beta # alpha coefficient for time progression equation. Expresses weight of revenue growth
 
     Idiosyncratic_risk_mean = 0 # mean for normal distribution for idiosyncratic risk
-    Idiosyncratic_risk_sd = 0.0754 # standard deviation for normal distribution for idiosyncratic risk
+    Idiosyncratic_risk_sd = 0.123 # standard deviation for normal distribution for idiosyncratic risk
 
     # Startup Coefficeints - Sub_Industries - same probability for each - random choice
     List_of_Sub_Industries = ["Sub_Industry_1", "Sub_Industry_2", "Sub_Industry_3", "Sub_Industry_4", "Sub_Industry_5"]
@@ -163,12 +163,11 @@ for sim in range(number_of_simulations):
             else:
                 # Get expected return based on the current revenue growth
                 for i in Portfolio:
-                    Projected_Growth = getattr(i[0], "Growth_after_DD")
+                    Projected_Growth = getattr(i[0], "Growth")
 
                     # i[1] would correspond to the action on the startup, that is the amount invested (so it is used as weight for portfolio return)
                     Return = float((self.Growth_to_returns(Projected_Growth)*i[1]))+ Return
                 return Return
-
 
 
         # Calculate the actual return of the portfolio   
@@ -192,19 +191,7 @@ for sim in range(number_of_simulations):
                         Correlation_coeff =  float(Subindustry_correlation_matrix.loc[getattr(i[0], "Sub_Industry"), getattr(j[0], "Sub_Industry")]) 
                         Total_variance = (weight_i*weight_j*Correlation_coeff*sd_i*sd_j) + Total_variance
             return Total_variance
-        
-        def portfolio_variance(self, Portfolio):
-            Total_variance = 0
-            Avg_return = 0
-            for i in Portfolio:
-                Avg_return = float(self.Growth_to_returns(getattr(i[0], "Growth"))) + Avg_return
-            Avg_return = Avg_return/len(Portfolio)
-            for j in Portfolio:
-                Total_variance = abs((float(self.Growth_to_returns(getattr(i[0], "Growth"))) - Avg_return)**(2)) + Total_variance
-            Total_variance = Total_variance/len(Portfolio)
-            return Total_variance
 
-        
             
         # Expected Sharpe ratio
         def expected_Sharpe_ratio(self, Portfolio):  
@@ -212,13 +199,7 @@ for sim in range(number_of_simulations):
                 return 0
             else:
                 return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_variance(Portfolio)**(1/2))
-        
-        def actual_Sharpe_ratio(self, Portfolio):
-            if len(Portfolio) == 0:
-                return 0
-            else:
-                return float(self.actual_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio)**(1/2))
-        
+
 
                 # Gets reward after taking action a 
         def get_reward(self, action, old_portfolio):
@@ -240,9 +221,9 @@ for sim in range(number_of_simulations):
                 # Action cannot be more than 1
                 if action>1:
                     return torch.tensor([-100*action[0]])
-            # No investment if investment period is past
+            # No investment if investment period is past - actually has no effect as no decisions are made once the investment stage is passed.
             else:
-                return torch.tensor([(self.actual_Sharpe_ratio-self.Endowement)])
+                return torch.tensor([0])
         
 
         # Gets state which is inputed into the RL model - this is what the agent observes
@@ -295,7 +276,7 @@ for sim in range(number_of_simulations):
             # Attribute 10 - Remaining of investment stage as a percentage
             Remaining_of_investment_stage = self.Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
             
-            state_ = torch.tensor([Prospect_Growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, VC_quality, Endowement, Remaining_of_investment_stage])
+            state_ = torch.tensor([Prospect_Growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
             return state_
         
         # Gets next state 
@@ -344,7 +325,7 @@ for sim in range(number_of_simulations):
             # Attribute 10 - Remaining of investment stage as a percentage
             Remaining_of_investment_stage = self.Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
             
-            next_state_ = torch.tensor([Prospect_growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, VC_quality, Endowement, Remaining_of_investment_stage])
+            next_state_ = torch.tensor([Prospect_growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
             return next_state_
         
         # Executes the changes that occur at each time step
@@ -408,7 +389,7 @@ for sim in range(number_of_simulations):
             if len(self.VC_investments) == 0:
                 self.Growth = self.Growth + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
             else:
-                advisory_factor = self.average_investor_quality()-advisory_VC_quality_delta # VC quality distribution but same mean as the revenue growth with good advisory
+                advisory_factor = self.average_investor_quality()-advisory_VC_quality_delta # VC quality distribution but same mean as the revenue growoth with good advisory
                 self.Growth = Alpha*self.Growth + Beta*advisory_factor + np.random.normal(Idiosyncratic_risk_mean, Idiosyncratic_risk_sd)
             self.Life_stage += 1    
             # Normalise so that there is no revenue growth of below -100% (impossible) or above 100% equivalently - no extremes due to noise
