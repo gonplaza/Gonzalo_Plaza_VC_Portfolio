@@ -86,7 +86,7 @@ for sim in range(number_of_simulations):
     Alpha = 1- Beta # alpha coefficient for time progression equation. Expresses weight of revenue growth
 
     Idiosyncratic_risk_mean = 0 # mean for normal distribution for idiosyncratic risk
-    Idiosyncratic_risk_sd = 0.0754 # standard deviation for normal distribution for idiosyncratic risk
+    Idiosyncratic_risk_sd = 0.123 # standard deviation for normal distribution for idiosyncratic risk
 
     # Startup Coefficeints - Sub_Industries - same probability for each - random choice
     List_of_Sub_Industries = ["Sub_Industry_1", "Sub_Industry_2", "Sub_Industry_3", "Sub_Industry_4", "Sub_Industry_5"]
@@ -162,12 +162,11 @@ for sim in range(number_of_simulations):
             else:
                 # Get expected return based on the current revenue growth
                 for i in Portfolio:
-                    Projected_Growth = getattr(i[0], "Growth_after_DD")
+                    Projected_Growth = getattr(i[0], "Growth")
 
                     # i[1] would correspond to the action on the startup, that is the amount invested (so it is used as weight for portfolio return)
                     Return = float((self.Growth_to_returns(Projected_Growth)*i[1]))+ Return
                 return Return
-
 
 
         # Calculate the actual return of the portfolio   
@@ -191,19 +190,7 @@ for sim in range(number_of_simulations):
                         Correlation_coeff =  float(Subindustry_correlation_matrix.loc[getattr(i[0], "Sub_Industry"), getattr(j[0], "Sub_Industry")]) 
                         Total_variance = (weight_i*weight_j*Correlation_coeff*sd_i*sd_j) + Total_variance
             return Total_variance
-        
-        def portfolio_variance(self, Portfolio):
-            Total_variance = 0
-            Avg_return = 0
-            for i in Portfolio:
-                Avg_return = float(self.Growth_to_returns(getattr(i[0], "Growth"))) + Avg_return
-            Avg_return = Avg_return/len(Portfolio)
-            for j in Portfolio:
-                Total_variance = abs((float(self.Growth_to_returns(getattr(i[0], "Growth"))) - Avg_return)**(2)) + Total_variance
-            Total_variance = Total_variance/len(Portfolio)
-            return Total_variance
 
-        
             
         # Expected Sharpe ratio
         def expected_Sharpe_ratio(self, Portfolio):  
@@ -211,12 +198,6 @@ for sim in range(number_of_simulations):
                 return 0
             else:
                 return float(self.expected_return(Portfolio) - Compounded_risk_free_rate)/float(self.expected_portfolio_variance(Portfolio)**(1/2))
-        
-        def actual_Sharpe_ratio(self, Portfolio):
-            if len(Portfolio) == 0:
-                return 0
-            else:
-                return float(self.actual_return(Portfolio) - Compounded_risk_free_rate)/float(self.portfolio_variance(Portfolio)**(1/2))
 
 
                 # Gets reward after taking action a 
@@ -239,9 +220,9 @@ for sim in range(number_of_simulations):
                 # Action cannot be more than 1
                 if action>1:
                     return torch.tensor([-100*action[0]])
-            # No investment if investment period is past
+            # No investment if investment period is past - actually has no effect as no decisions are made once the investment stage is passed.
             else:
-                return torch.tensor([(self.actual_Sharpe_ratio-self.Endowement)])
+                return torch.tensor([0])
         
 
         # Gets state which is inputed into the RL model - this is what the agent observes
