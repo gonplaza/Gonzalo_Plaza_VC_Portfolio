@@ -111,11 +111,21 @@ class Actor(nn.Module): # inherits neural network module
 		self.layer2 = nn.Linear(self.hidden_width, self.hidden_width)
 		nn.init.xavier_uniform_(self.layer2.weight) 
 		nn.init.zeros_(self.layer2.bias) 
-		self.bn2 = nn.LayerNorm(hidden_width)	
+		self.bn2 = nn.LayerNorm(hidden_width)
 
-		self.layer3 = nn.Linear(self.hidden_width, self.action_dim)
+		self.layer3 = nn.Linear(self.hidden_width, self.hidden_width)
 		nn.init.xavier_uniform_(self.layer3.weight) 
 		nn.init.zeros_(self.layer3.bias) 
+		self.bn3 = nn.LayerNorm(hidden_width)
+
+		self.layer4 = nn.Linear(self.hidden_width, self.hidden_width)
+		nn.init.xavier_uniform_(self.layer4.weight) 
+		nn.init.zeros_(self.layer4.bias) 
+		self.bn4 = nn.LayerNorm(hidden_width)	
+
+		self.layer5 = nn.Linear(self.hidden_width, self.action_dim)
+		nn.init.xavier_uniform_(self.layer5.weight) 
+		nn.init.zeros_(self.layer5.bias) 
 
 		self.checkpoint_file = name+'SSTD3_weights.pth'
 
@@ -126,7 +136,13 @@ class Actor(nn.Module): # inherits neural network module
 		a = self.layer2(a)
 		a = self.bn2(a)
 		a = F.relu (a)
-		a = (torch.tanh(self.layer3(a))+1)/2 # scales and shifts outputs between 0 and 1 - endowment
+		a = self.layer3(a)
+		a = self.bn3(a)
+		a = F.relu (a)
+		a = self.layer4(a)
+		a = self.bn4(a)
+		a = F.relu (a)
+		a = (torch.tanh(self.layer5(a))+1)/2 # scales and shifts outputs between 0 and 1 - endowment
 		return a
 	
 	def save_checkpoint(self):
@@ -156,10 +172,20 @@ class Critic(nn.Module):
 		nn.init.xavier_uniform_(self.layer2a.weight) 
 		nn.init.zeros_(self.layer2a.bias) 
 		self.bn2a = nn.LayerNorm(hidden_width)
-		
-		self.layer3a = nn.Linear(self.hidden_width, 1) # output is single scalar Q-value estimation for an input state-action pair
+
+		self.layer3a = nn.Linear(self.hidden_width, self.hidden_width)
 		nn.init.xavier_uniform_(self.layer3a.weight) 
 		nn.init.zeros_(self.layer3a.bias) 
+		self.bn3a = nn.LayerNorm(hidden_width)
+
+		self.layer4a = nn.Linear(self.hidden_width, self.hidden_width)
+		nn.init.xavier_uniform_(self.layer4a.weight) 
+		nn.init.zeros_(self.layer4a.bias) 
+		self.bn4a = nn.LayerNorm(hidden_width)
+		
+		self.layer5a = nn.Linear(self.hidden_width, 1) # output is single scalar Q-value estimation for an input state-action pair
+		nn.init.xavier_uniform_(self.layer5a.weight) 
+		nn.init.zeros_(self.layer5a.bias) 
 		
         # layers for second Critic network
 		self.layer1b = nn.Linear(self.state_dim + self.action_dim, self.hidden_width) 
@@ -171,10 +197,20 @@ class Critic(nn.Module):
 		nn.init.xavier_uniform_(self.layer2b.weight) 
 		nn.init.zeros_(self.layer2b.bias) 
 		self.bn2b = nn.LayerNorm(hidden_width)
-		
-		self.layer3b = nn.Linear(self.hidden_width, 1)
+
+		self.layer3b = nn.Linear(self.hidden_width, self.hidden_width)
 		nn.init.xavier_uniform_(self.layer3b.weight) 
 		nn.init.zeros_(self.layer3b.bias) 
+		self.bn3b = nn.LayerNorm(hidden_width)
+
+		self.layer4b = nn.Linear(self.hidden_width, self.hidden_width)
+		nn.init.xavier_uniform_(self.layer4b.weight) 
+		nn.init.zeros_(self.layer4b.bias) 
+		self.bn4b = nn.LayerNorm(hidden_width)
+		
+		self.layer5b = nn.Linear(self.hidden_width, 1)
+		nn.init.xavier_uniform_(self.layer5b.weight) 
+		nn.init.zeros_(self.layer5b.bias) 
 
 		self.checkpoint_file = name+'SSTD3_weights.pth'
 
@@ -189,6 +225,12 @@ class Critic(nn.Module):
 		q1 = self.bn2a(q1)
 		q1 = F.relu(q1)
 		q1 = self.layer3a(q1)
+		q1 = self.bn3a(q1)
+		q1 = F.relu(q1)
+		q1 = self.layer4a(q1)
+		q1 = self.bn4a(q1)
+		q1 = F.relu(q1)
+		q1 = self.layer5a(q1)
 		
 		q2 = self.layer1b(sa)
 		q2 = self.bn1b(q2)
@@ -197,6 +239,12 @@ class Critic(nn.Module):
 		q2 = self.bn2b(q2)
 		q2 = F.relu(q2)
 		q2 = self.layer3b(q2)
+		q2 = self.bn3b(q2)
+		q2 = F.relu(q2)
+		q2 = self.layer4b(q2)
+		q2 = self.bn4b(q2)
+		q2 = F.relu(q2)
+		q2 = self.layer5b(q2)
 
 		return q1, q2
 	
