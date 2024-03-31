@@ -77,8 +77,8 @@ for sim in range(number_of_simulations):
     Growth_loc = 0.55 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
     Growth_scale = 0.54 # scale parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
     # dictionaries with loc and scale parameters for the revenue growth distribution for each industry
-    Industry_loc = {"IT": 0.475, "B2C": 0.530, "Materials": 0.553, "Energy": 0.576, "Health": 0.632}
-    Industry_scale = {"IT": 0.466, "B2C": 0.520, "Materials": 0.543, "Energy": 0.565, "Health": 0.621}
+    Industry_loc = {"IT": 0.484, "B2C": 0.508, "Materials": 0.553, "Energy": 0.601, "Health": 0.624}
+    Industry_scale = {"IT": 0.475, "B2C": 0.498, "Materials": 0.543, "Energy": 0.590, "Health": 0.612}
 
     # Startup Coefficients - Time progression equation
     # Gorwth = Alpha*Growth + Beta*Advisory + Idiosyncratic risk
@@ -99,7 +99,7 @@ for sim in range(number_of_simulations):
     # Startup Coefficients - Due Diligence
     Noise_mean_before_DD = 0 # mean for normal distribution of noise before due diligence
     # Standard deviation for normal distribution of noise before due diligence
-    Noise_sd_before_DD = {"IT": 0.307, "B2C": 0.342, "Materials": 0.357, "Energy": 0.372, "Health": 0.407} 
+    Noise_sd_before_DD = {"IT": 0.312, "B2C": 0.327, "Materials": 0.357, "Energy": 0.387, "Health": 0.402} 
 
     # Startup Coefficients - Investors
     Number_of_DD_investors = 5 # number of investors enagaged in due diligence per startup
