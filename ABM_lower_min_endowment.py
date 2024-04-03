@@ -73,9 +73,9 @@ for sim in range(number_of_simulations):
     #Startup Coefficients - General
     VCs_to_new_startups_ratio = 260 #The ratio of number of VCs to new startups every quarter worldwide
     Number_of_new_startups = Number_of_VCs*VCs_to_new_startups_ratio #Applies ratio to estimate the appropriate number of new startups per time step for the model
-    Growth_a = -2.89 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
-    Growth_loc = 0.55 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
-    Growth_scale = 0.54 # scale parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+    Growth_a = -2.899 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+    Growth_loc = 0.553 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+    Growth_scale = 0.543 # scale parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
     # dictionaries with loc and scale parameters for the revenue growth distribution for each subindustry
     Sub_Industry_loc = {"Sub_Industry_1": 0.475, "Sub_Industry_2": 0.530, "Sub_Industry_3": 0.553, "Sub_Industry_4": 0.576, "Sub_Industry_5": 0.632}
     Sub_Industry_scale = {"Sub_Industry_1": 0.466, "Sub_Industry_2": 0.520, "Sub_Industry_3": 0.543, "Sub_Industry_4": 0.565, "Sub_Industry_5": 0.621}
