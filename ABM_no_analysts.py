@@ -27,7 +27,7 @@ Portfolio_data = []
 
 for sim in range(number_of_simulations):
 
-    agent = Agent(state_dim = 10, action_dim = 1) # Initialise the agent
+    agent = Agent(state_dim = 9, action_dim = 1) # Initialise the agent
     np.random.seed(0) # enables consisent outputs from random number generation
     if sim != 0:
         agent.load_model_parameters() # load the trained model parameters for all the networks
@@ -64,7 +64,7 @@ for sim in range(number_of_simulations):
     # VC Coefficients - Time needed
     DD_time = 60 # Time in hours needed to perform due diligence a startup
     Advising_time = 45 # Time in hours needed per time step (i.e. 3 months) to advise to a startup in the portfolio
-    DDs_per_quarter_per_firm = 83 # Fixed number of DDs a firm can do per timestep, independent of number of analysts
+    DDs_per_quarter_per_firm = 83 # Fixed number of DDs a firm can do per timestep, independent of number of analysts (based on 10 analysts).
 
     # VC Coefficients - Returns
     VC_returns_alpha = 2.06 # alpha coefficient for power law distribution of VC retruns
@@ -74,9 +74,9 @@ for sim in range(number_of_simulations):
     #Startup Coefficients - General
     VCs_to_new_startups_ratio = 260 #The ratio of number of VCs to new startups every quarter worldwide
     Number_of_new_startups = Number_of_VCs*VCs_to_new_startups_ratio #Applies ratio to estimate the appropriate number of new startups per time step for the model
-    Growth_a = -2.89 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
-    Growth_loc = 0.55 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
-    Growth_scale = 0.54 # scale parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+    Growth_a = -2.899 # a parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+    Growth_loc = 0.553 # loc parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
+    Growth_scale = 0.543 # scale parameter for the average skewed normal distribution of revenue growth for a startup, taken as a measure of potential
     # dictionaries with loc and scale parameters for the revenue growth distribution for each subindustry
     Sub_Industry_loc = {"Sub_Industry_1": 0.475, "Sub_Industry_2": 0.530, "Sub_Industry_3": 0.553, "Sub_Industry_4": 0.576, "Sub_Industry_5": 0.632}
     Sub_Industry_scale = {"Sub_Industry_1": 0.466, "Sub_Industry_2": 0.520, "Sub_Industry_3": 0.543, "Sub_Industry_4": 0.565, "Sub_Industry_5": 0.621}
@@ -268,7 +268,7 @@ for sim in range(number_of_simulations):
             
             ## VC attributes
             # Attribute 7 - percentage of total screening/DD capacity left, given a portfolio size
-            Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
+            #Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
             # Attribute 8 - VC quality
             VC_quality = self.VC_quality
             # Attribute 9 - Endowment left (1 at the beginning)
@@ -276,7 +276,7 @@ for sim in range(number_of_simulations):
             # Attribute 10 - Remaining of investment stage as a percentage
             Remaining_of_investment_stage = self.Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
             
-            state_ = torch.tensor([Prospect_Growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+            state_ = torch.tensor([Prospect_Growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, VC_quality, Endowement, Remaining_of_investment_stage])
             return state_
         
         # Gets next state 
@@ -317,7 +317,7 @@ for sim in range(number_of_simulations):
             
             ## VC attributes
             # Attribute 7 - percentage of total screening capacity left, given a portfolio size
-            Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
+            #Percentage_screening_left = self.Effort_left_for_DD/(Time_for_DD_and_advising_per_analyst_per_fund*self.Investment_analysts)
             # Attribute 8 - VC quality
             VC_quality = self.VC_quality
             # Attribute 9 - Endowment left (1 at the beginning)
@@ -325,7 +325,7 @@ for sim in range(number_of_simulations):
             # Attribute 10 - Remaining of investment stage as a percentage
             Remaining_of_investment_stage = self.Remaining_of_investment_stage/(Fund_maturity - Startup_exit)
             
-            next_state_ = torch.tensor([Prospect_growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, Percentage_screening_left, VC_quality, Endowement, Remaining_of_investment_stage])
+            next_state_ = torch.tensor([Prospect_growth, Avg_corr, Screenings_mean, Screenings_sd, Portfolio_mean, Portfolio_sd, VC_quality, Endowement, Remaining_of_investment_stage])
             return next_state_
         
         # Executes the changes that occur at each time step
