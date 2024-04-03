@@ -1,2 +1,3 @@
 # Gonzalo_Plaza_VC_Portfolio
 This project aims to create an agent-based model trained using deep reinforcement learning to find the optimal number of startups in a venture capital portfolio.
+When running any of the files (ABM.py, ABM_lower_min_investment.py or ABM_no_analysts.py) please make sure that the SSTD3.py and Sub_Industry_Correlation_Matrix.xlsx are in the same folder, and that the libraries torch and numpy are downloaded in your system. The results (3 separate files) and the .pth files (4 separate files) with the network parameters will be created in the same folder once the simulation is run.
