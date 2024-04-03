@@ -23,7 +23,7 @@ class ReplayBuffer(object):
         self.device = device
 
         # create arrays for replay buffer and dead array to flag when agent reaches a terminal state
-        self.state = np.zeros((max_size, state_dim)) 
+        self.state = np.zeros((max_size, state_dim))
         self.action = np.zeros((max_size, action_dim))
         self.reward = np.zeros((max_size, 1)) # one reward per experience
         self.next_state = np.zeros((max_size, state_dim))
